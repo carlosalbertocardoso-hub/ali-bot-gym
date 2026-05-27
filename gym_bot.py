@@ -382,6 +382,80 @@ def select_day(device, dia_clase):
     return False
 
 
+def find_card_and_book(device, nombre, hora):
+    """
+    Parsea el XML de la pantalla buscando una tarjeta que contenga
+    tanto el nombre de clase como la hora, y pulsa RESERVAR en ella.
+    Descarta tarjetas con CANCELAR (ya reservada) o ÚNETE (llena).
+    Devuelve: 'booked', 'already', 'full', o None si no encontrada.
+    """
+    xml = device.dump_hierarchy()
+
+    # Dividir el XML en bloques aproximados por tarjeta.
+    # Cada tarjeta contiene la hora, el nombre, y uno de: RESERVAR / CANCELAR / ÚNETE
+    # Buscar bloques que contengan la hora Y el nombre de clase
+    # Trabajamos sobre el XML plano buscando proximidad de texto
+    lines = xml.split('\n')
+
+    # Encontrar índices de líneas que contengan la hora y el nombre
+    hora_indices = [i for i, l in enumerate(lines) if hora in l]
+    nombre_indices = [i for i, l in enumerate(lines) if nombre.upper() in l.upper() or nombre.lower() in l.lower()]
+
+    log.info(f"  hora '{hora}' found at lines: {hora_indices[:5]}")
+    log.info(f"  nombre '{nombre}' found at lines: {nombre_indices[:5]}")
+
+    # Para cada aparición de la hora, buscar si hay un nombre cercano (ventana de ±40 líneas)
+    matched_hora_line = None
+    for hi in hora_indices:
+        for ni in nombre_indices:
+            if abs(hi - ni) <= 40:
+                matched_hora_line = hi
+                log.info(f"  Card matched: hora line {hi}, nombre line {ni}")
+                break
+        if matched_hora_line is not None:
+            break
+
+    if matched_hora_line is None:
+        log.warning(f"  No card found with {nombre} at {hora}")
+        return None
+
+    # Extraer el bloque de la tarjeta (±50 líneas alrededor de la hora)
+    start = max(0, matched_hora_line - 50)
+    end = min(len(lines), matched_hora_line + 50)
+    block = '\n'.join(lines[start:end])
+
+    # Detectar estado
+    if 'CANCELAR' in block or 'Cancelar' in block:
+        log.info(f"  Class {nombre} {hora} already booked (CANCELAR found)")
+        return 'already'
+    if 'ÚNETE' in block or 'UNETE' in block.upper() or 'únete' in block.lower():
+        log.info(f"  Class {nombre} {hora} is full (ÚNETE found)")
+        return 'full'
+
+    # Buscar RESERVAR en el bloque — hacer click por coordenadas del elemento en el XML
+    reservar_match = re.search(r'text="RESERVAR"[^/]*/?\s*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', block)
+    if not reservar_match:
+        # Intentar orden inverso bounds/text
+        reservar_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="RESERVAR"', block)
+
+    if reservar_match:
+        x1, y1, x2, y2 = map(int, reservar_match.groups())
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        log.info(f"  Tapping RESERVAR at ({cx}, {cy})")
+        tap_adb(cx, cy)
+        return 'booked'
+
+    # Fallback: buscar el elemento uiautomator2 directamente
+    el = device(text="RESERVAR")
+    if el.exists:
+        el.click()
+        log.info("  Clicked RESERVAR via uiautomator2")
+        return 'booked'
+
+    log.warning("  RESERVAR button not found in card block")
+    return None
+
+
 def book_class(device, clase):
     """Reserva una clase específica en la pantalla de COLECTIVAS."""
     nombre = clase["nombre"]
@@ -395,36 +469,40 @@ def book_class(device, clase):
         screenshot(device, "day_not_found")
         return False
 
-    time.sleep(2)
+    time.sleep(3)
     screenshot(device, "day_selected")
 
-    # Buscar la tarjeta de la clase por nombre
-    if not click_text(device, nombre, timeout=8):
-        log.warning(f"Class not found: {nombre}")
-        screenshot(device, "class_not_found")
-        return False
+    # Intentar hasta 3 veces (el botón puede aparecer con retraso)
+    for attempt in range(3):
+        dismiss_anr(device)
+        result = find_card_and_book(device, nombre, hora)
 
-    time.sleep(2)
-    screenshot(device, "class_selected")
+        if result == 'already':
+            log.info(f"Class {nombre} {hora} is already booked — nothing to do")
+            screenshot(device, "already_booked")
+            return True
 
-    # En algunas vistas la hora aparece dentro de la tarjeta; en otras hay que entrar y confirmar
-    # Intentar buscar la hora concreta si hay varias sesiones del mismo nombre
-    hora_el = device(textContains=hora)
-    if hora_el.exists:
-        hora_el.click()
-        log.info(f"  Selected time slot: {hora}")
-        time.sleep(2)
+        if result == 'full':
+            log.warning(f"Class {nombre} {hora} is full")
+            screenshot(device, "class_full")
+            return False
 
-    # Confirmar reserva
-    booked = click_if_present(device, "RESERVAR", "Reservar", "BOOK", "Book",
-                               "CONFIRMAR", "Confirmar", "Confirm", "OK", timeout=6)
-    if booked:
-        log.info(f"RESERVED: {nombre} {hora}")
+        if result == 'booked':
+            time.sleep(4)
+            screenshot(device, "after_reservar_tap")
+            # Confirmar si aparece diálogo de confirmación
+            click_if_present(device, "CONFIRMAR", "Confirmar", "Confirm", "OK",
+                             "ACEPTAR", "Aceptar", timeout=5)
+            time.sleep(3)
+            screenshot(device, "booked")
+            log.info(f"RESERVED: {nombre} {hora}")
+            return True
+
+        # No encontrado — esperar y reintentar
+        log.info(f"  Attempt {attempt+1}: card not found, waiting...")
         time.sleep(3)
-        screenshot(device, "booked")
-        return True
 
-    log.warning(f"Could not confirm booking for {nombre} {hora}")
+    log.warning(f"Could not find or book {nombre} {hora} after 3 attempts")
     screenshot(device, "book_failed")
     return False
 
