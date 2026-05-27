@@ -446,10 +446,17 @@ def main():
     log.info(f"GYM BOT — {datetime.now():%Y-%m-%d %H:%M}")
 
     now = datetime.now()
-    # En CI (GitHub Actions) el cron ya controla la hora, no filtrar
     if not os.environ.get("CI") and now.hour != 22:
         log.info("Not reservation time (22:00). Exiting.")
         return
+
+    # En CI arrancamos 20 min antes — esperar hasta las 22:00 exactas (UTC)
+    if os.environ.get("CI"):
+        target = now.replace(hour=20, minute=0, second=0, microsecond=0)
+        wait = (target - now).total_seconds()
+        if wait > 0:
+            log.info(f"Waiting {wait:.0f}s until 22:00 Madrid (20:00 UTC)...")
+            time.sleep(wait)
 
     clase = get_today_class()
     if not clase:

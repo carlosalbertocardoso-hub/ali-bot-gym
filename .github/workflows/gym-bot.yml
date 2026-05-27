@@ -2,12 +2,12 @@ name: Gym Bot Reserva
 
 on:
   schedule:
-    # Domingo 22:00 Madrid (UTC+2 verano = 20:00 UTC) → Body Tono lunes 18:00
-    - cron: '0 20 * * 0'
-    # Martes 22:00 Madrid → Body Tono miércoles 18:00
-    - cron: '0 20 * * 2'
-    # Miércoles 22:00 Madrid → POWER jueves 19:00
-    - cron: '0 20 * * 3'
+    # Domingo 21:40 Madrid (UTC+2 verano = 19:40 UTC) → Body Tono lunes 18:00
+    - cron: '40 19 * * 0'
+    # Martes 21:40 Madrid → Body Tono miércoles 18:00
+    - cron: '40 19 * * 2'
+    # Miércoles 21:40 Madrid → POWER jueves 19:00
+    - cron: '40 19 * * 3'
   workflow_dispatch:  # permite lanzarlo manualmente desde GitHub
 
 jobs:
