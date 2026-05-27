@@ -362,23 +362,53 @@ def navigate_to_colectivas(device):
 def select_day(device, dia_clase):
     """Selecciona el día correcto en el selector horizontal de días."""
     log.info(f"--- SELECT DAY: weekday {dia_clase} ---")
-    DAY_LABELS = {0: "LUN", 1: "MAR", 2: "MIÉ", 3: "JUE", 4: "VIE", 5: "SÁB", 6: "DOM"}
-    # También en inglés por si la app está en inglés
-    DAY_LABELS_EN = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI", 5: "SAT", 6: "SUN"}
+    # Variantes con y sin tilde, más inglés
+    DAY_CANDIDATES = {
+        0: ["LUN", "MON"],
+        1: ["MAR", "TUE"],
+        2: ["MIÉ", "MIE", "WED"],
+        3: ["JUE", "THU"],
+        4: ["VIE", "FRI"],
+        5: ["SÁB", "SAB", "SAT"],
+        6: ["DOM", "SUN"],
+    }
 
-    label_es = DAY_LABELS[dia_clase]
-    label_en = DAY_LABELS_EN[dia_clase]
+    # Calcular la fecha exacta del día de la clase (puede ser mañana o pasado mañana)
+    from datetime import timedelta
+    today = datetime.now()
+    days_ahead = (dia_clase - today.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7  # si hoy es el mismo día, es la semana que viene
+    target_date = today + timedelta(days=days_ahead)
+    day_number = str(target_date.day)
+    log.info(f"  Looking for day {dia_clase} = {target_date.strftime('%a %d')}, day number: {day_number}")
 
-    # Buscar celda que contenga el label del día (puede ser "LUN 25", "LUN\n25", etc.)
-    for label in (label_es, label_en):
+    # Intentar primero buscando etiqueta + número de día (más preciso)
+    for label in DAY_CANDIDATES[dia_clase]:
+        # Buscar elemento que contenga la abreviatura del día Y el número
+        xml = device.dump_hierarchy()
+        pattern = rf'text="({re.escape(label)}\s*{re.escape(day_number)}|{re.escape(day_number)}\s*{re.escape(label)})"'
+        match = re.search(pattern, xml, re.IGNORECASE)
+        if match:
+            el = device(text=match.group(1))
+            if not el.exists:
+                el = device(textContains=label)
+            if el.exists:
+                el.click()
+                log.info(f"  Selected day: {match.group(1)}")
+                time.sleep(2)
+                return True
+
+    # Fallback: solo por abreviatura
+    for label in DAY_CANDIDATES[dia_clase]:
         el = device(textContains=label)
         if el.exists:
             el.click()
-            log.info(f"  Selected day: {label}")
+            log.info(f"  Selected day (fallback): {label}")
             time.sleep(2)
             return True
 
-    log.warning(f"Day not found: {label_es}")
+    log.warning(f"Day not found: weekday {dia_clase}")
     return False
 
 
