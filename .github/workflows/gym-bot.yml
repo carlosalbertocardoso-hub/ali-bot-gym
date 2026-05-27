@@ -72,24 +72,7 @@ jobs:
           avd-name: GymBotPlayAVD
           emulator-options: -no-snapshot-load -no-audio -no-metrics -gpu swiftshader_indirect
           disable-animations: true
-          script: |
-            # Detectar serial real del emulador
-            SERIAL=$(adb devices | grep emulator | head -1 | cut -f1)
-            echo "Emulator serial: $SERIAL"
-            export DEVICE_SERIAL=$SERIAL
-
-            # Instalar Technogym
-            adb -s $SERIAL install-multiple -r \
-              technogym-3.43.2-xapk/com.technogym.tgapp.apk \
-              technogym-3.43.2-xapk/config.en.apk \
-              technogym-3.43.2-xapk/config.xxhdpi.apk \
-              technogym-3.43.2-xapk/config.arm64_v8a.apk
-
-            # Inicializar uiautomator2
-            python -m uiautomator2 init -s $SERIAL
-
-            # Ejecutar bot
-            python gym_bot.py
+          script: bash run_bot.sh
 
       - name: Upload screenshots on failure
         if: failure()
