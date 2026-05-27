@@ -512,6 +512,16 @@ def book_class(device, clase):
 # ============================================================
 
 def get_today_class():
+    # FORCE_CLASS env var: "NOMBRE,HH:MM,dia_clase_weekday" — omite comprobación de día
+    force = os.environ.get("FORCE_CLASS")
+    if force:
+        parts = force.split(",")
+        nombre = parts[0].strip()
+        hora = parts[1].strip() if len(parts) > 1 else "18:00"
+        dia_clase = int(parts[2].strip()) if len(parts) > 2 else datetime.now().weekday()
+        log.info(f"FORCE_CLASS override: {nombre} {hora} weekday {dia_clase}")
+        return {"nombre": nombre, "hora": hora, "dia_clase": dia_clase, "dia_reserva": -1}
+
     today = datetime.now().weekday()
     for c in CLASES:
         if c["dia_reserva"] == today:
@@ -524,12 +534,14 @@ def main():
     log.info(f"GYM BOT — {datetime.now():%Y-%m-%d %H:%M}")
 
     now = datetime.now()
-    if not os.environ.get("CI") and now.hour != 22:
+    force = os.environ.get("FORCE_CLASS")
+
+    if not os.environ.get("CI") and not force and now.hour != 22:
         log.info("Not reservation time (22:00). Exiting.")
         return
 
-    # En CI arrancamos 20 min antes — esperar hasta las 22:00 exactas (UTC)
-    if os.environ.get("CI"):
+    # En CI sin forzado: esperar hasta las 22:00 exactas (UTC 20:00)
+    if os.environ.get("CI") and not force:
         target = now.replace(hour=20, minute=0, second=0, microsecond=0)
         wait = (target - now).total_seconds()
         if wait > 0:

@@ -8,7 +8,12 @@ on:
     - cron: '40 19 * * 2'
     # Miércoles 21:40 Madrid → POWER jueves 19:00
     - cron: '40 19 * * 3'
-  workflow_dispatch:  # permite lanzarlo manualmente desde GitHub
+  workflow_dispatch:
+    inputs:
+      force_class:
+        description: 'Forzar clase: "NOMBRE,HH:MM,dia_semana" (ej: AEROSTYLOS,18:00,2)'
+        required: false
+        default: ''
 
 jobs:
   reserva:
@@ -64,6 +69,8 @@ jobs:
 
       - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FORCE_CLASS: ${{ github.event.inputs.force_class }}
         with:
           api-level: 34
           target: google_apis_playstore
