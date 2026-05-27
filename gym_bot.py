@@ -428,8 +428,25 @@ def find_card_and_book(device, nombre, hora):
     if 'CANCELAR' in block or 'Cancelar' in block:
         log.info(f"  Class {nombre} {hora} already booked (CANCELAR found)")
         return 'already'
-    if 'ÚNETE' in block or 'UNETE' in block.upper() or 'únete' in block.lower():
-        log.info(f"  Class {nombre} {hora} is full (ÚNETE found)")
+
+    # Clase llena — intentar apuntarse a la lista de espera pulsando ÚNETE
+    unete_block = block.upper()
+    if 'ÚNETE' in block or 'UNETE' in unete_block or 'únete' in block.lower():
+        log.info(f"  Class {nombre} {hora} is full — trying waitlist (ÚNETE)")
+        unete_match = re.search(r'text="[Úú]NETE"[^/]*/?\s*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', block)
+        if not unete_match:
+            unete_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="[Úú]NETE"', block)
+        if unete_match:
+            x1, y1, x2, y2 = map(int, unete_match.groups())
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            log.info(f"  Tapping ÚNETE at ({cx}, {cy})")
+            tap_adb(cx, cy)
+            return 'waitlist'
+        el = device(textContains="NETE")
+        if el.exists:
+            el.click()
+            log.info("  Clicked ÚNETE via uiautomator2")
+            return 'waitlist'
         return 'full'
 
     # Buscar RESERVAR en el bloque — hacer click por coordenadas del elemento en el XML
@@ -482,8 +499,18 @@ def book_class(device, clase):
             screenshot(device, "already_booked")
             return True
 
+        if result == 'waitlist':
+            time.sleep(4)
+            screenshot(device, "after_unete_tap")
+            click_if_present(device, "CONFIRMAR", "Confirmar", "Confirm", "OK",
+                             "ACEPTAR", "Aceptar", timeout=5)
+            time.sleep(3)
+            screenshot(device, "waitlist")
+            log.info(f"WAITLIST: joined waitlist for {nombre} {hora}")
+            return True
+
         if result == 'full':
-            log.warning(f"Class {nombre} {hora} is full")
+            log.warning(f"Class {nombre} {hora} is full and could not join waitlist")
             screenshot(device, "class_full")
             return False
 
@@ -540,14 +567,6 @@ def main():
         log.info("Not reservation time (22:00). Exiting.")
         return
 
-    # En CI sin forzado: esperar hasta las 22:00 exactas (UTC 20:00)
-    if os.environ.get("CI") and not force:
-        target = now.replace(hour=20, minute=0, second=0, microsecond=0)
-        wait = (target - now).total_seconds()
-        if wait > 0:
-            log.info(f"Waiting {wait:.0f}s until 22:00 Madrid (20:00 UTC)...")
-            time.sleep(wait)
-
     clase = get_today_class()
     if not clase:
         log.info("No reservation scheduled today. Exiting.")
@@ -578,6 +597,17 @@ def main():
         if not navigate_to_colectivas(device):
             log.error("Navigation failed — aborting")
             return
+
+        # En CI sin forzado: esperar con la app ya abierta en COLECTIVAS
+        # hasta las 22:00 exactas (20:00 UTC) antes de intentar la reserva
+        if os.environ.get("CI") and not force:
+            now = datetime.utcnow()
+            target = now.replace(hour=20, minute=0, second=0, microsecond=0)
+            wait = (target - now).total_seconds()
+            if wait > 0:
+                log.info(f"App ready. Waiting {wait:.0f}s until 22:00 Madrid (20:00 UTC)...")
+                time.sleep(wait)
+            log.info("22:00 reached — booking now")
 
         book_class(device, clase)
 
