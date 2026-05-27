@@ -21,7 +21,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y libpulse0 libpulse-dev pulseaudio
+          sudo apt-get install -y libpulse0 pulseaudio xvfb libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
+
+      - name: Start virtual display
+        run: |
+          Xvfb :0 -screen 0 1280x800x24 &
+          echo "DISPLAY=:0" >> $GITHUB_ENV
 
       - name: Enable KVM
         run: |
