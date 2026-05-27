@@ -534,6 +534,86 @@ def book_class(device, clase):
     return False
 
 
+def refresh_colectivas(device, dia_clase):
+    """Fuerza un refresco de la pantalla COLECTIVAS: pull-to-refresh + re-selección de día."""
+    try:
+        # Pull-to-refresh: swipe hacia abajo desde el centro de la lista
+        device.swipe(540, 600, 540, 1200, duration=0.4)
+        time.sleep(2)
+    except Exception:
+        pass
+    select_day(device, dia_clase)
+    time.sleep(2)
+
+
+def book_class_with_refresh(device, clase):
+    """
+    Intenta reservar durante hasta 3 minutos refrescando cada 5 segundos.
+    Útil para el momento exacto de apertura (22:00): el botón RESERVAR puede
+    tardar unos segundos en aparecer después del horario de apertura.
+    """
+    nombre = clase["nombre"]
+    hora = clase["hora"]
+    dia = clase["dia_clase"]
+
+    log.info(f"--- BOOK WITH REFRESH: {nombre} {hora} (weekday {dia}) ---")
+
+    if not select_day(device, dia):
+        log.warning("Could not select day")
+        screenshot(device, "day_not_found")
+        return False
+
+    time.sleep(3)
+    screenshot(device, "day_selected")
+
+    deadline = time.time() + 180  # 3 minutos máximo
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        dismiss_anr(device)
+        log.info(f"  Refresh attempt {attempt}...")
+        result = find_card_and_book(device, nombre, hora)
+
+        if result == 'already':
+            log.info(f"Class {nombre} {hora} is already booked — nothing to do")
+            screenshot(device, "already_booked")
+            return True
+
+        if result == 'waitlist':
+            time.sleep(4)
+            screenshot(device, "after_unete_tap")
+            click_if_present(device, "CONFIRMAR", "Confirmar", "Confirm", "OK",
+                             "ACEPTAR", "Aceptar", timeout=5)
+            time.sleep(3)
+            screenshot(device, "waitlist")
+            log.info(f"WAITLIST: joined waitlist for {nombre} {hora}")
+            return True
+
+        if result == 'full':
+            log.warning(f"Class {nombre} {hora} is full and could not join waitlist")
+            screenshot(device, "class_full")
+            return False
+
+        if result == 'booked':
+            time.sleep(4)
+            screenshot(device, "after_reservar_tap")
+            click_if_present(device, "CONFIRMAR", "Confirmar", "Confirm", "OK",
+                             "ACEPTAR", "Aceptar", timeout=5)
+            time.sleep(3)
+            screenshot(device, "booked")
+            log.info(f"RESERVED: {nombre} {hora}")
+            return True
+
+        # Tarjeta no encontrada o botón no disponible todavía — refrescar
+        log.info(f"  Card/button not available yet — refreshing in 5s")
+        time.sleep(5)
+        refresh_colectivas(device, dia)
+
+    log.warning(f"Could not book {nombre} {hora} after 3 minutes of retries")
+    screenshot(device, "book_timeout")
+    return False
+
+
 # ============================================================
 # ENTRY POINT
 # ============================================================
@@ -607,9 +687,9 @@ def main():
             if wait > 0:
                 log.info(f"App ready. Waiting {wait:.0f}s until 22:00 Madrid (20:00 UTC)...")
                 time.sleep(wait)
-            log.info("22:00 reached — booking now")
+            log.info("22:00 reached — starting booking loop")
 
-        book_class(device, clase)
+        book_class_with_refresh(device, clase)
 
     except Exception as e:
         log.error(f"Unhandled error: {e}", exc_info=True)
