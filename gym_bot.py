@@ -22,7 +22,7 @@ from datetime import datetime
 EMAIL = "aliciaramirezcaballero@gmail.com"
 PASSWORD = "gimnasio"
 APP_PACKAGE = "com.technogym.tgapp"
-DEVICE_SERIAL = "emulator-5554"
+DEVICE_SERIAL = os.environ.get("DEVICE_SERIAL", "emulator-5554")
 AVD_NAME = "GymBotPlayAVD"
 BASE_DIR = os.path.dirname(__file__)
 
