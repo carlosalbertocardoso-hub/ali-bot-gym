@@ -1,0 +1,93 @@
+name: Gym Bot Reserva
+
+on:
+  schedule:
+    # Domingo 22:00 Madrid (UTC+2 verano = 20:00 UTC) → Body Tono lunes 18:00
+    - cron: '0 20 * * 0'
+    # Martes 22:00 Madrid → Body Tono miércoles 18:00
+    - cron: '0 20 * * 2'
+    # Miércoles 22:00 Madrid → POWER jueves 19:00
+    - cron: '0 20 * * 3'
+  workflow_dispatch:  # permite lanzarlo manualmente desde GitHub
+
+jobs:
+  reserva:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install uiautomator2
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android emulator image
+        run: |
+          sdkmanager --install \
+            "system-images;android-34;google_apis_playstore;x86_64" \
+            "emulator" \
+            "platform-tools"
+
+      - name: Create AVD
+        run: |
+          echo no | avdmanager create avd \
+            --name GymBotPlayAVD \
+            --package "system-images;android-34;google_apis_playstore;x86_64" \
+            --device "pixel_2" \
+            --force
+
+      - name: Start emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis_playstore
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 4096M
+          heap-size: 512M
+          avd-name: GymBotPlayAVD
+          emulator-options: -no-snapshot-load -no-audio -no-metrics -gpu swiftshader_indirect
+          disable-animations: true
+          script: |
+            # Instalar Technogym
+            adb install-multiple -r \
+              technogym-3.43.2-xapk/com.technogym.tgapp.apk \
+              technogym-3.43.2-xapk/config.en.apk \
+              technogym-3.43.2-xapk/config.xxhdpi.apk \
+              technogym-3.43.2-xapk/config.arm64_v8a.apk
+
+            # Inicializar uiautomator2
+            python -m uiautomator2 init
+
+            # Ejecutar bot
+            python gym_bot.py
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_id }}
+          path: screenshots/
+          retention-days: 7
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gym-bot-log-${{ github.run_id }}
+          path: gym_bot.log
+          retention-days: 30

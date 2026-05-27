@@ -1,0 +1,8 @@
+jdk17/
+platform-tools/
+technogym-3.43.2.xapk
+technogym.apk
+__pycache__/
+*.pyc
+*.log
+screenshots/
