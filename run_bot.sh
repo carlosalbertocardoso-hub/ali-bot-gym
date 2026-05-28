@@ -14,9 +14,10 @@ if [ ! -f "$ADBKB_APK" ]; then
 fi
 ls -la "$ADBKB_APK"
 adb -s "$SERIAL" install -r "$ADBKB_APK"
-adb -s "$SERIAL" shell ime enable com.android.adbkeyboard/.AdbIME
-adb -s "$SERIAL" shell ime set com.android.adbkeyboard/.AdbIME
-echo "AdbKeyboard installed and set as default IME"
+# ime enable/set falla en Android 14 user build; escribimos directo en secure settings
+adb -s "$SERIAL" shell settings put secure enabled_input_methods com.android.adbkeyboard/.AdbIME
+adb -s "$SERIAL" shell settings put secure default_input_method com.android.adbkeyboard/.AdbIME
+echo "AdbKeyboard set as default IME via secure settings"
 
 adb -s "$SERIAL" install-multiple -r \
   technogym-3.43.2-xapk/com.technogym.tgapp.apk \

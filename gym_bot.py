@@ -184,11 +184,14 @@ def use_android_keyboard():
     Aquí solo lo activamos (por si algo lo cambió entre instalación y uso).
     """
     enable_soft_keyboard()
-    result = run_adb("shell", "ime", "set", ADBKEYBOARD_IME, timeout=5)
+    # ime enable/set falla en Android 14 user build (Play Store image);
+    # escribimos directo en secure settings como hace run_bot.sh
+    run_adb("shell", "settings", "put", "secure", "enabled_input_methods", ADBKEYBOARD_IME, timeout=5)
+    result = run_adb("shell", "settings", "put", "secure", "default_input_method", ADBKEYBOARD_IME, timeout=5)
     if result.returncode != 0:
         log.warning(f"Could not switch to AdbKeyboard: {(result.stdout + result.stderr).strip()}")
     else:
-        log.info("AdbKeyboard IME enabled")
+        log.info("AdbKeyboard IME enabled via secure settings")
 
 
 def log_keyboard_state(label):
