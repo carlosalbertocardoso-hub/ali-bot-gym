@@ -114,7 +114,9 @@ Instalación:
 - `system-images;android-34;google_apis_playstore;x86_64`
 - Play Services: `versionCode=231818047`, `versionName=23.18.18`.
 - Technogym 3.43.2 pasa del splash a la UI moderna.
-- Problema: en modo headless va lento y lanza ANR de System UI. Se usa 4 GB RAM, 4 cores.
+- Problema: en modo headless va lento y puede lanzar ANR de System UI / Pixel Launcher. Se usa 4 GB RAM en CI.
+
+Nota 2026-05-28: se probó `system-images;android-34;google_apis;x86_64` para evitar ANRs. El emulador arrancó más limpio, pero Technogym no expuso correctamente el onboarding/login: uiautomator solo veía el reloj y no aparecía el campo email. Se revirtió a `google_apis_playstore`, que sigue siendo el target correcto para esta app.
 
 `gym_bot.py` apunta a:
 
@@ -180,6 +182,10 @@ Los binarios APK están en Git LFS. El workflow usa `actions/checkout@v4` con `l
 
 - `screenshots/` + `login_failed_hierarchy.xml` → artifact `screenshots-{run_id}` (7 días)
 - `gym_bot.log` → artifact `gym-bot-log-{run_id}` (30 días)
+- Capturas útiles recientes:
+  - `blind_login_fallback_*.png`: antes de tocar LOG IN por coordenadas cuando uiautomator no ve la pantalla inicial.
+  - `login_form_not_found_*.png`: cuando se cree estar en formulario pero no aparece el campo email.
+  - `after_adb_type_*.png`: después de escribir texto por ADB, para confirmar foco/teclado.
 
 ### Test manual
 
@@ -241,6 +247,7 @@ else:
 - Campo password: `loginPage.password.textfield`
 - Botón login: `loginPage.login.button`
 - Fallback ADB tap LOG IN: coordenadas `(540, 1710)` en 1080x1920
+- Si la pantalla inicial no está expuesta a uiautomator y solo se ve el reloj, `login()` prueba ese fallback en los intentos 5, 10 y 15.
 
 ### Login — entrada de texto en Android 14
 
@@ -262,13 +269,26 @@ Solución actual en `gym_bot.py`:
 enter_text(device, field, text)
 ```
 
-El helper primero limpia el campo, luego intenta `field.set_text(text)` y, si falla, usa fallback ADB:
+El helper no usa `device.send_keys`, clipboard ni `AdbKeyboard`. Tampoco depende ya de `field.set_text`.
+
+Secuencia actual:
+
+1. Espera a que no haya ANR (`wait_for_no_anr`).
+2. Trae Technogym al foreground con `monkey -p com.technogym.tgapp`.
+3. Enfoca y limpia el campo.
+4. Escribe con ADB:
+   - trozos alfanuméricos con `adb shell input text ...`
+   - `@` con `KEYCODE_AT`
+   - `.` con `KEYCODE_PERIOD`
+5. Vuelve a leer el campo si `verify=True`.
 
 ```bash
 adb shell input text ...
 ```
 
 El login llama a `enter_text(device, email_el, EMAIL)` y `enter_text(device, pw_el, PASSWORD)`.
+
+Si el campo sigue vacío, mirar en los artifacts `after_adb_type_loginPage.username.textfield*.png`, `login_failed_hierarchy.xml` y `gym_bot.log` para saber si el problema es foco, overlay/ANR o que la pantalla real no es el formulario.
 
 ### Post-login detection (bucle de 20 iteraciones)
 
@@ -336,15 +356,33 @@ Pantalla COLECTIVAS:
 - Selector de días horizontal: `MIE 27`, `JUE 28`, `VIE 29`, etc.
 - Lista de tarjetas con nombre de clase, hora y botón de estado (RESERVAR / CANCELAR / ÚNETE)
 
-## Problemas conocidos / pendientes
+## Estado actual / pendientes
 
-1. **Login corregido, pendiente validar en CI**: el fallo de `send_keys`/`AdbKeyboard` del 28 mayo 2026 está corregido con `enter_text(...)`, pero falta confirmar con un run manual exitoso.
-2. **Post-login detection no validada en CI**: los 20 intentos (×3s) deberían bastar para emulador fresco, pero falta confirmar qué textos aparecen tras login.
-3. **Flujo de reserva no validado end-to-end**: el código está implementado pero nunca ha llegado a hacer click en RESERVAR con éxito en CI.
-4. **Nombre real de la clase CICLO**: el nombre en la app puede ser "Ciclo", "Cycling", "Indoor Cycling" u otro. Se sabrá en el próximo log cuando `find_card_and_book` busque la tarjeta. La búsqueda es case-insensitive (`nombre.upper() in l.upper()`).
-5. **AVD lento en headless**: lanza ANR de System UI. `dismiss_anr()` lo gestiona con tap ADB en `(350, 1090)`.
-6. **Split arm64_v8a en x86_64**: el emulador puede estar usando traducción binaria, explicando parte de la lentitud. Solución ideal: usar Play Store oficial dentro del AVD.
-7. **Cuenta/club**: no confirmado que la cuenta quede automáticamente asociada al club Mercantil en el emulador (puede requerir configuración manual la primera vez).
+Último commit conocido empujado antes de esta nota:
+
+```text
+9b87d69 Restore Play Store emulator for Technogym login
+```
+
+Estado real a 2026-05-28:
+
+1. **El target correcto vuelve a ser `google_apis_playstore`**: el ensayo con `google_apis` quitó parte de la inestabilidad, pero no mostró el onboarding/login de Technogym.
+2. **Login todavía pendiente de un CI verde**: el fallo inicial de `send_keys`/`AdbKeyboard` está mitigado con escritura ADB por chunks, pero los últimos runs fallaron antes de validar un login completo.
+3. **ANR mejor gestionado**: `dismiss_anr()` busca botones reales `Wait` / `Esperar` y los toca por bounds; si no puede, usa fallback aproximado `(725, 1090)`.
+4. **Pantalla inicial parcialmente oculta a uiautomator**: cuando solo aparece el reloj, `login()` hace fallback de tap en LOG IN `(540, 1710)` y guarda capturas `blind_login_fallback_*.png`.
+5. **Post-login detection no validada en CI**: los 20 intentos (×3s) deberían bastar, pero falta confirmar qué textos aparecen tras login.
+6. **Flujo de reserva no validado end-to-end**: el código está implementado pero aún no ha llegado a hacer click en RESERVAR con éxito en CI.
+7. **Nombre real de la clase CICLO**: puede ser "Ciclo", "Cycling", "Indoor Cycling" u otro. Se sabrá cuando `find_card_and_book` llegue a la lista de clases. La búsqueda es case-insensitive (`nombre.upper() in l.upper()`).
+8. **Split arm64_v8a en x86_64**: el emulador puede estar usando traducción binaria, explicando parte de la lentitud.
+9. **Cuenta/club**: no confirmado que la cuenta quede automáticamente asociada al club Mercantil en el emulador; podría requerir configuración manual la primera vez.
+
+Siguiente diagnóstico recomendado si falla otro run:
+
+1. Revisar `gym_bot.log`.
+2. Abrir `login_failed_hierarchy.xml`.
+3. Comparar las capturas `blind_login_fallback_*.png`, `login_form_not_found_*.png` y `after_adb_type_*.png`.
+4. Si el campo email existe pero queda vacío, el problema es foco/input.
+5. Si el campo email no existe, el problema sigue siendo onboarding/renderizado/ANR, no la escritura de texto.
 
 ## Comandos útiles
 
