@@ -71,7 +71,21 @@ def adb_path():
 
 def run_adb(*args, timeout=20):
     cmd = [adb_path(), "-s", DEVICE_SERIAL, *args]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Make sure no zombie adb is left holding the shell, otherwise the next
+        # adb call can also hang on the same stuck channel.
+        try:
+            subprocess.run(
+                [adb_path(), "-s", DEVICE_SERIAL, "shell", "true"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except Exception:
+            pass
+        # Return a synthetic CompletedProcess-like object so callers can react
+        # without being forced to handle TimeoutExpired everywhere.
+        return subprocess.CompletedProcess(cmd, returncode=124, stdout="", stderr="timeout")
 
 
 def emulator_is_online():
@@ -156,15 +170,22 @@ def grant_app_permissions():
 def enable_soft_keyboard():
     """Muestra el teclado Android aunque el emulador tenga teclado hardware."""
     try:
-        run_adb("shell", "settings", "put", "secure", "show_ime_with_hard_keyboard", "1", timeout=10)
+        run_adb("shell", "settings", "put", "secure", "show_ime_with_hard_keyboard", "1", timeout=5)
     except Exception:
         pass
 
 
 def use_android_keyboard():
-    """Usa el teclado Android estándar visible para escribir credenciales."""
+    """Configura el teclado Android.
+
+    Importante: no forzamos LatinIME porque su composición asíncrona puede
+    hacer que `adb shell input text` se cuelgue indefinidamente en Android 14.
+    El bot escribe credenciales con keyevents por carácter, que funcionan
+    independientemente del IME activo.
+    """
     enable_soft_keyboard()
-    result = run_adb("shell", "ime", "set", LATIN_IME, timeout=10)
+    # Intentar LatinIME por si más tarde necesitamos set_text como fallback.
+    result = run_adb("shell", "ime", "set", LATIN_IME, timeout=5)
     if result.returncode != 0:
         log.warning(f"Could not switch to LatinIME: {(result.stdout + result.stderr).strip()}")
     else:
@@ -268,53 +289,67 @@ def focus_field(field, fallback_x, fallback_y):
         tap_adb(fallback_x, fallback_y)
 
 
-ADB_TEXT_KEYEVENTS = {
+ADB_KEYCODES = {
     "@": "KEYCODE_AT",
     ".": "KEYCODE_PERIOD",
+    "_": "KEYCODE_UNDERSCORE",
+    "-": "KEYCODE_MINUS",
+    "+": "KEYCODE_PLUS",
+    "/": "KEYCODE_SLASH",
 }
 
+# Mapping for letters/digits — using direct KEYCODE_X / KEYCODE_NUM_X.
+# Letters are uppercase, lowercase is achieved by NOT pressing shift.
+def _char_keycode(char):
+    if char.isalpha():
+        return f"KEYCODE_{char.upper()}"
+    if char.isdigit():
+        return f"KEYCODE_{char}"
+    return ADB_KEYCODES.get(char)
 
-def adb_input_text_chunk(chunk):
-    safe = chunk.replace("%", "%25").replace(" ", "%s")
-    result = run_adb("shell", "input", "text", safe, timeout=10)
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout or "adb input text failed").strip()
-        raise RuntimeError(details)
+
+def adb_send_char(char):
+    """Envía un carácter por keyevent. Evita 'input text' (puede colgarse con IME)."""
+    keycode = _char_keycode(char)
+    if not keycode:
+        # Fallback: usar input text de forma protegida con timeout corto.
+        safe = char.replace("%", "%25").replace(" ", "%s")
+        run_adb("shell", "input", "text", safe, timeout=5)
+        return
+    if char.isalpha() and char.isupper():
+        run_adb("shell", "input", "keyevent", "KEYCODE_SHIFT_LEFT", keycode, timeout=5)
+    else:
+        run_adb("shell", "input", "keyevent", keycode, timeout=5)
 
 
 def adb_type_text(text):
-    """Escribe en el campo enfocado usando Android input, sin clipboard ni IME externa."""
-    chunk = []
+    """Escribe carácter a carácter por keyevent.
 
-    def flush():
-        if chunk:
-            adb_input_text_chunk("".join(chunk))
-            chunk.clear()
-            time.sleep(0.2)
-
+    Razón: en Android 14 con LatinIME, `adb shell input text <largo>` puede
+    colgarse indefinidamente porque el texto pasa por el IME que compone
+    de forma asíncrona. Usar `input keyevent` evita la cola del IME.
+    """
     for char in text:
-        if char.isalnum():
-            chunk.append(char)
-            continue
+        adb_send_char(char)
+        # Pausa mínima para que la app procese cada tecla (Flutter es lento).
+        time.sleep(0.05)
 
-        flush()
-        keycode = ADB_TEXT_KEYEVENTS.get(char)
-        if not keycode:
-            raise RuntimeError(f"Unsupported adb input character: {char!r}")
-        result = run_adb("shell", "input", "keyevent", keycode, timeout=10)
-        if result.returncode != 0:
-            details = (result.stderr or result.stdout or f"adb keyevent {keycode} failed").strip()
-            raise RuntimeError(details)
-        time.sleep(0.2)
 
-    flush()
+def disable_soft_keyboard():
+    """Desactiva el IME para que `input text`/keyevent vayan directos al campo."""
+    try:
+        run_adb("shell", "settings", "put", "secure", "show_ime_with_hard_keyboard", "0", timeout=5)
+    except Exception:
+        pass
 
 
 def clear_focused_text():
-    run_adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", timeout=10)
-    for _ in range(80):
-        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=10)
-    time.sleep(0.5)
+    # Selecciona todo y borra de una sola pulsación, en lugar de 80 DEL secuenciales.
+    run_adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", timeout=5)
+    # Ctrl+A no funciona universalmente, así que combinamos: move end + N backspaces.
+    for _ in range(60):
+        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
+    time.sleep(0.3)
 
 
 def read_field_text(device, resource_id):
@@ -328,10 +363,13 @@ def read_field_text(device, resource_id):
 
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo por ADB input, evitando clipboard, send_keys e IME externas."""
-    wait_for_no_anr(device, timeout=20)
-    bring_app_foreground()
-    wait_for_no_anr(device, timeout=10)
+    """Rellena un campo por keyevents ADB, sin clipboard, send_keys ni IME externas.
+
+    Importante: NO traer la app a foreground aquí — un monkey/launcher en medio
+    del flujo de tipeo puede robar el foco y dejar la cadena cortada o colgar
+    `adb shell input text`. Confiamos en que el caller ya está en el formulario.
+    """
+    dismiss_anr(device)
     focus_field(field, fallback_x, fallback_y)
     log_keyboard_state("before_clear")
     clear_focused_text()
@@ -348,8 +386,24 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
 
     actual = read_field_text(device, resource_id)
     if actual.lower() == text.lower():
-        log.info(f"Text entered with adb input: {resource_id}")
+        log.info(f"Text entered with adb keyevent: {resource_id}")
         return True
+
+    # Fallback final: si los keyevents no llegaron al campo (p.ej. foco perdido),
+    # intentar set_text() de uiautomator2. Puede fallar con SecurityException en
+    # Android 14, pero merece la pena el intento antes de abortar.
+    try:
+        log.info(f"Keyevents did not land in {resource_id}; retrying with set_text")
+        focus_field(field, fallback_x, fallback_y)
+        time.sleep(0.5)
+        field.set_text(text)
+        time.sleep(1)
+        actual = read_field_text(device, resource_id)
+        if actual.lower() == text.lower():
+            log.info(f"Text entered via set_text fallback: {resource_id}")
+            return True
+    except Exception as exc:
+        log.info(f"set_text fallback failed: {exc}")
 
     raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
 
