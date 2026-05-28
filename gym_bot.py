@@ -9,12 +9,14 @@ Programado vía Windows Task Scheduler:
 Ejecutar: python gym_bot.py
 """
 import uiautomator2 as u2
+import base64
 import time
 import logging
 import os
 import re
 import subprocess
 from datetime import datetime
+from uiautomator2.utils import with_package_resource
 
 # ============================================================
 # CONFIGURACIÓN
@@ -22,6 +24,7 @@ from datetime import datetime
 EMAIL = "aliciaramirezcaballero@gmail.com"
 PASSWORD = "gimnasio"
 APP_PACKAGE = "com.technogym.tgapp"
+ADB_KEYBOARD_IME = "com.github.uiautomator/.AdbKeyboard"
 DEVICE_SERIAL = os.environ.get("DEVICE_SERIAL", "emulator-5554")
 AVD_NAME = "GymBotPlayAVD"
 BASE_DIR = os.path.dirname(__file__)
@@ -160,6 +163,31 @@ def enable_soft_keyboard():
         pass
 
 
+def ensure_adb_keyboard():
+    """Instala y activa AdbKeyboard como IME Android para escribir en campos Flutter."""
+    try:
+        ime_list = run_adb("shell", "ime", "list", "-s", timeout=10).stdout
+        if ADB_KEYBOARD_IME not in ime_list:
+            with with_package_resource("assets/app-uiautomator.apk") as apk_path:
+                run_adb("install", "-r", str(apk_path), timeout=60)
+
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            ime_list = run_adb("shell", "ime", "list", "-s", timeout=10).stdout
+            if ADB_KEYBOARD_IME in ime_list:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError("AdbKeyboard did not appear in IME list")
+
+        run_adb("shell", "ime", "enable", ADB_KEYBOARD_IME, timeout=10)
+        run_adb("shell", "ime", "set", ADB_KEYBOARD_IME, timeout=10)
+        run_adb("shell", "settings", "put", "secure", "default_input_method", ADB_KEYBOARD_IME, timeout=10)
+        log.info("AdbKeyboard IME enabled")
+    except Exception as exc:
+        raise RuntimeError(f"Could not enable AdbKeyboard IME: {exc}") from exc
+
+
 # ============================================================
 # UI HELPERS
 # ============================================================
@@ -206,37 +234,20 @@ def focus_field(field, fallback_x, fallback_y):
         tap_adb(fallback_x, fallback_y)
 
 
-def adb_keyevent_text(text):
-    """Escribe texto básico con keyevents, útil cuando Flutter ignora set_text."""
-    keycodes = {
-        "@": "KEYCODE_AT",
-        ".": "KEYCODE_PERIOD",
-        "-": "KEYCODE_MINUS",
-        "_": "KEYCODE_MINUS",
-        " ": "KEYCODE_SPACE",
-    }
-    for char in text:
-        if "a" <= char.lower() <= "z":
-            keycode = f"KEYCODE_{char.upper()}"
-        elif char.isdigit():
-            keycode = f"KEYCODE_{char}"
-        else:
-            keycode = keycodes.get(char)
+def adb_keyboard_broadcast(action, *args, timeout=20):
+    result = run_adb("shell", "am", "broadcast", "-a", action, *args, timeout=timeout)
+    if result.returncode != 0 or "result=-1" not in result.stdout:
+        detail = (result.stdout + result.stderr).strip()
+        raise RuntimeError(f"AdbKeyboard broadcast failed: {action}: {detail}")
 
-        if keycode:
-            result = run_adb("shell", "input", "keyevent", keycode, timeout=10)
-        else:
-            raise RuntimeError(f"Unsupported keyboard character: {char!r}")
 
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"adb keyevent failed: {char}")
-        time.sleep(0.08)
+def adb_keyboard_text(text):
+    encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    adb_keyboard_broadcast("ADB_KEYBOARD_INPUT_TEXT", "--es", "text", encoded, timeout=30)
 
 
 def clear_focused_text():
-    run_adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", timeout=10)
-    for _ in range(80):
-        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=10)
+    adb_keyboard_broadcast("ADB_KEYBOARD_CLEAR_TEXT")
     time.sleep(0.5)
 
 
@@ -251,11 +262,11 @@ def read_field_text(device, resource_id):
 
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo con el teclado Android, sin clipboard, set_text ni input text."""
+    """Rellena un campo con AdbKeyboard, sin clipboard, set_text ni adb input text."""
     focus_field(field, fallback_x, fallback_y)
     clear_focused_text()
     focus_field(field, fallback_x, fallback_y)
-    adb_keyevent_text(text)
+    adb_keyboard_text(text)
     time.sleep(1)
 
     if not verify or not resource_id:
@@ -263,7 +274,7 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
 
     actual = read_field_text(device, resource_id)
     if actual.lower() == text.lower():
-        log.info(f"Text entered with Android keyboard: {resource_id}")
+        log.info(f"Text entered with AdbKeyboard: {resource_id}")
         return True
 
     raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
@@ -948,6 +959,7 @@ def main():
         ensure_emulator()
         grant_app_permissions()
         enable_soft_keyboard()
+        ensure_adb_keyboard()
 
         device = u2.connect(DEVICE_SERIAL)
         # uiautomator2 server puede tardar unos segundos en estar listo
