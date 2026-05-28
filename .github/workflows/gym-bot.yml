@@ -18,7 +18,7 @@ on:
 jobs:
   reserva:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       FORCE_CLASS: ${{ github.event.inputs.force_class }}
 
@@ -39,9 +39,8 @@ jobs:
 
       - name: Enable KVM
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          sudo chmod 666 /dev/kvm
+          ls -la /dev/kvm  # confirmar permisos aplicados
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -76,10 +75,10 @@ jobs:
           target: google_apis_playstore
           arch: x86_64
           profile: pixel_2
-          ram-size: 4096M
+          ram-size: 2048M
           heap-size: 512M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-audio -no-metrics -gpu swiftshader_indirect
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
           script: bash run_bot.sh
 
