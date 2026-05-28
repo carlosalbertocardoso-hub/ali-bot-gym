@@ -234,7 +234,8 @@ def login(device):
     time.sleep(4)
 
     # Descartar cualquier diálogo inicial hasta que veamos la pantalla de inicio
-    for _ in range(12):
+    INIT_DIALOGS = ["OK", "CONTINUE", "SKIP", "Allow", "While using the app"]
+    for _ in range(20):
         dismiss_anr(device)
         texts = get_texts(device)
         log.info(f"Login loop texts: {texts[:6]}")
@@ -259,13 +260,19 @@ def login(device):
             time.sleep(4)
             break
 
-        # Descartar diálogos de onboarding / permisos
-        dismissed = click_if_present(device, "OK", "CONTINUE", "SKIP", "Allow",
-                                     "While using the app", timeout=1)
-        if dismissed:
-            continue
+        # Descartar diálogos de onboarding / permisos — sin timeout, solo .exists
+        for dlg in INIT_DIALOGS:
+            el = device(textContains=dlg)
+            if el.exists:
+                try:
+                    el.click()
+                    log.info(f"  Dismissed init dialog: {dlg}")
+                    time.sleep(2)
+                    break
+                except Exception:
+                    pass
 
-        time.sleep(2)
+        time.sleep(3)
 
     # Rellenar formulario de login
     time.sleep(3)
@@ -762,10 +769,23 @@ def main():
         device.screen_on()
         time.sleep(2)
 
+        # Esperar a que el sistema esté estable (descartar ANR del Launcher)
+        log.info("Waiting for system to stabilize...")
+        for _ in range(20):
+            xml = device.dump_hierarchy()
+            if "isn't responding" in xml or "not responding" in xml.lower():
+                log.info("System ANR during startup — tapping Wait")
+                tap_adb(350, 1090)
+                time.sleep(3)
+            else:
+                time.sleep(2)
+                break
+
         device.app_stop(APP_PACKAGE)
-        time.sleep(2)
+        time.sleep(3)
         device.app_start(APP_PACKAGE)
-        time.sleep(10)
+        log.info("App started — waiting 30s for initial load...")
+        time.sleep(30)
 
         if not login(device):
             log.error("Login failed — aborting")
