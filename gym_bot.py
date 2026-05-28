@@ -176,6 +176,32 @@ def tap_adb(x, y):
     time.sleep(1)
 
 
+def adb_input_text(text):
+    """Escribe texto con ADB, evitando clipboard/IME de uiautomator2 en Android 14."""
+    escaped = text.replace("%", "%25").replace(" ", "%s")
+    result = run_adb("shell", "input", "text", escaped, timeout=10)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "adb input text failed")
+
+
+def enter_text(device, field, text):
+    """Rellena un campo sin usar device.send_keys, que puede fallar con SecurityException."""
+    try:
+        device.clear_text()
+    except Exception:
+        run_adb("shell", "input", "keyevent", "KEYCODE_CTRL_LEFT", "KEYCODE_A", timeout=10)
+        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=10)
+    time.sleep(0.5)
+
+    try:
+        field.set_text(text)
+        return
+    except Exception as exc:
+        log.info(f"uiautomator set_text failed, falling back to adb input: {exc}")
+
+    adb_input_text(text)
+
+
 def dismiss_anr(device):
     """Descarta diálogos ANR 'System UI isn't responding' / 'Process system isn't responding'."""
     xml = device.dump_hierarchy()
@@ -301,9 +327,7 @@ def login(device):
             except Exception:
                 tap_adb(540, 315)
             time.sleep(1)
-            device.clear_text()
-            time.sleep(0.5)
-            device.send_keys(EMAIL, clear=False)
+            enter_text(device, email_el, EMAIL)
             time.sleep(1)
             log.info(f"Email entered: {EMAIL}")
             filled_email = True
@@ -353,9 +377,7 @@ def login(device):
             except Exception:
                 tap_adb(540, 525)
             time.sleep(1)
-            device.clear_text()
-            time.sleep(0.5)
-            device.send_keys(PASSWORD, clear=False)
+            enter_text(device, pw_el, PASSWORD)
             time.sleep(1)
             log.info("Password entered")
             filled_pw = True
