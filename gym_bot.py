@@ -523,6 +523,13 @@ def login(device):
     if not filled_email:
         log.warning("Could not find email field")
         screenshot(device, "login_form_not_found")
+        try:
+            xml_path = os.path.join(BASE_DIR, "login_failed_hierarchy.xml")
+            with open(xml_path, "w", encoding="utf-8") as fh:
+                fh.write(device.dump_hierarchy())
+            log.info(f"Saved UI hierarchy to {xml_path}")
+        except Exception as exc:
+            log.info(f"Could not save login failure hierarchy: {exc}")
         return False
 
     # Pulsar NEXT para avanzar al paso de password
