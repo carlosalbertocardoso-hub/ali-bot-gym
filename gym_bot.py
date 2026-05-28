@@ -233,6 +233,31 @@ def tap_adb(x, y):
     time.sleep(1)
 
 
+def tap_element_center(element, fallback_x=None, fallback_y=None):
+    try:
+        b = element.info.get("bounds", {})
+        cx = (b["left"] + b["right"]) // 2
+        cy = (b["top"] + b["bottom"]) // 2
+        tap_adb(cx, cy)
+        return True
+    except Exception:
+        if fallback_x is not None and fallback_y is not None:
+            tap_adb(fallback_x, fallback_y)
+            return True
+    return False
+
+
+def bring_app_foreground():
+    run_adb(
+        "shell", "monkey",
+        "-p", APP_PACKAGE,
+        "-c", "android.intent.category.LAUNCHER",
+        "1",
+        timeout=15,
+    )
+    time.sleep(2)
+
+
 def focus_field(field, fallback_x, fallback_y):
     try:
         b = field.info.get("bounds", {})
@@ -304,6 +329,9 @@ def read_field_text(device, resource_id):
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
     """Rellena un campo por ADB input, evitando clipboard, send_keys e IME externas."""
+    wait_for_no_anr(device, timeout=20)
+    bring_app_foreground()
+    wait_for_no_anr(device, timeout=10)
     focus_field(field, fallback_x, fallback_y)
     log_keyboard_state("before_clear")
     clear_focused_text()
@@ -331,10 +359,24 @@ def dismiss_anr(device):
     xml = device.dump_hierarchy()
     if "isn't responding" in xml or "not responding" in xml.lower():
         log.info("ANR detected — tapping Wait")
-        # Coordenadas del botón Wait en 1080x1920
-        tap_adb(350, 1090)
+        for label in ("Wait", "Esperar"):
+            wait_btn = device(text=label)
+            if wait_btn.exists and tap_element_center(wait_btn):
+                time.sleep(3)
+                return True
+        # Fallbacks for common 1080x1920 ANR dialog button positions.
+        tap_adb(725, 1090)
         time.sleep(3)
         return True
+    return False
+
+
+def wait_for_no_anr(device, timeout=30):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not dismiss_anr(device):
+            return True
+        bring_app_foreground()
     return False
 
 
@@ -1018,8 +1060,9 @@ def main():
         for _ in range(30):
             xml = device.dump_hierarchy()
             if "isn't responding" in xml or "not responding" in xml.lower():
-                log.info("System ANR during startup — tapping Wait")
-                tap_adb(350, 1090)
+                log.info("System ANR during startup — dismissing")
+                dismiss_anr(device)
+                bring_app_foreground()
                 stable_count = 0
                 time.sleep(4)
             else:
