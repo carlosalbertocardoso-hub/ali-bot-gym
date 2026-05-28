@@ -764,6 +764,17 @@ def login(device):
             except Exception:
                 pass
 
+        # Pantalla "Health Data Access" — botón SKIP FOR NOW por resource-id.
+        health_skip_btn = device(resourceId="authHealthPage.skip.button")
+        if health_skip_btn.exists:
+            try:
+                health_skip_btn.click()
+                log.info("  Dismissed authHealthPage via resource-id")
+                time.sleep(2)
+                continue
+            except Exception:
+                pass
+
         # Descarte rápido de diálogos por texto — sin timeout, solo .exists
         dismissed_any = False
         for dlg in DIALOG_TEXTS:
