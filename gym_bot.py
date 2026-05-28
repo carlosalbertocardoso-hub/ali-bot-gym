@@ -747,15 +747,25 @@ def login(device):
         except Exception:
             pass
 
+        # Llegamos a la home real del club — listo.
         if xml_contains_any(xml, HOME_INDICATORS):
             log.info("Club home reached")
             return True
 
-        if xml_contains_any(xml, AUTHENTICATED_INDICATORS) and not xml_contains_any(xml, LOGIN_FORM_INDICATORS):
-            log.info("Authenticated Technogym home reached (club-specific home not visible yet)")
-            return True
+        # Pantalla de permiso de notificaciones (resource-id específico de Technogym).
+        # Pulsamos el botón dismiss directamente por resource-id, sin depender del texto.
+        dismiss_btn = device(resourceId="pushNotificationPermission.dismiss.button")
+        if dismiss_btn.exists:
+            try:
+                dismiss_btn.click()
+                log.info("  Dismissed pushNotificationPermission via resource-id")
+                time.sleep(2)
+                continue
+            except Exception:
+                pass
 
-        # Descarte rápido de diálogos — sin timeout, solo .exists
+        # Descarte rápido de diálogos por texto — sin timeout, solo .exists
+        dismissed_any = False
         for dlg in DIALOG_TEXTS:
             el = device(textContains=dlg)
             if el.exists:
@@ -763,9 +773,17 @@ def login(device):
                     el.click()
                     log.info(f"  Dismissed: {dlg}")
                     time.sleep(2)
+                    dismissed_any = True
                     break
                 except Exception:
                     pass
+        if dismissed_any:
+            continue
+
+        # Solo damos por buena la "authenticated home" cuando no hay diálogos pendientes.
+        if xml_contains_any(xml, AUTHENTICATED_INDICATORS) and not xml_contains_any(xml, LOGIN_FORM_INDICATORS):
+            log.info("Authenticated Technogym home reached (club-specific home not visible yet)")
+            return True
 
         # Si se queda mucho tiempo en loading, relanzar una vez la app suele destrabar Flutter/WebView.
         if i == 20 and "contentloading" in xml.lower():
