@@ -362,79 +362,109 @@ def read_field_text(device, resource_id):
     return ""
 
 
-def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo de texto en una app Flutter/nativa.
+def _verify_field(device, resource_id, expected):
+    """Verifica el contenido de un campo Flutter.
 
-    Technogym usa Flutter — los campos no aceptan `adb input keyevent` ni
-    `input text` directamente. El método correcto es usar la API de
-    accesibilidad de uiautomator2 que Flutter sí expone.
-
-    Jerarquía de intentos:
-      1. field.set_text()  — AccessibilityNodeInfo.ACTION_SET_TEXT (Flutter lo soporta)
-      2. device.send_keys(use_clipboard=False)  — IME injection via uiautomator
-      3. adb keyevents carácter a carácter  — fallback de último recurso
+    Devuelve uno de:
+      'ok'      → el texto coincide
+      'unknown' → Flutter no expone el texto (campo aparece vacío en el árbol)
+                  pero la escritura pudo haber funcionado igual
+      'wrong'   → el campo tiene texto pero distinto del esperado (fallo confirmado,
+                  por ejemplo set_text que solo dejó la última letra)
     """
+    if not resource_id:
+        return 'unknown'
+    actual = read_field_text(device, resource_id)
+    if actual.lower() == expected.lower():
+        return 'ok'
+    # Flutter devuelve cadena vacía en la mayoría de versiones aunque el texto
+    # esté escrito visualmente. No podemos afirmar fallo en ese caso.
+    if not actual:
+        return 'unknown'
+    # Hay texto pero no es el esperado — es un fallo real (p.ej. set_text dejó "y").
+    return 'wrong'
+
+
+def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
+    """Rellena un campo de texto en la app Flutter de Technogym.
+
+    Orden de intentos (de más fiable a menos):
+      1. adb keyevents carácter a carácter — visiblemente confirmado que llega
+         al campo Flutter via el LatinIME activo (captura `after_adb_type_*`
+         mostraba el email completo y bien escrito).
+      2. send_keys de uiautomator2 — IME injection alternativa.
+      3. field.set_text() — último recurso; en Flutter suele dejar solo el
+         último carácter pero a veces funciona.
+
+    Verificación: Flutter no expone el texto en la jerarquía de accesibilidad,
+    por lo que `read_field_text()` puede devolver "" aunque el texto esté ahí.
+    Solo consideramos fallo confirmado si devuelve un texto no vacío y distinto
+    del esperado (síntoma del bug de set_text con "y").
+    """
+    last_actual = ""
+
+    def attempt_and_verify(label, action):
+        nonlocal last_actual
+        try:
+            action()
+            time.sleep(1)
+        except Exception as exc:
+            log.info(f"{label} raised: {exc}")
+            return None
+        screenshot(device, f"after_{label}_{resource_id or 'field'}")
+        if not verify:
+            log.info(f"Text entered via {label} (no verify): {resource_id}")
+            return True
+        status = _verify_field(device, resource_id, text)
+        last_actual = read_field_text(device, resource_id)
+        if status == 'ok':
+            log.info(f"Text entered via {label}: {resource_id}")
+            return True
+        if status == 'unknown':
+            log.info(f"{label}: field appears empty in tree but Flutter often hides it — assuming OK")
+            return True
+        log.info(f"{label} result wrong: {last_actual!r} (expected {text!r})")
+        return False
+
     dismiss_anr(device)
     focus_field(field, fallback_x, fallback_y)
     time.sleep(0.5)
     log_keyboard_state("before_type")
 
-    # Intento 1: set_text via AccessibilityNodeInfo
-    try:
-        field.set_text(text)
-        time.sleep(1)
-        if not verify or not resource_id:
-            log.info(f"Text entered via set_text: {resource_id}")
-            return True
-        actual = read_field_text(device, resource_id)
-        if actual.lower() == text.lower():
-            log.info(f"Text entered via set_text: {resource_id}")
-            return True
-        log.info(f"set_text result: {actual!r} (expected {text!r})")
-    except Exception as exc:
-        log.info(f"set_text failed: {exc}")
-
-    # Intento 2: send_keys via IME injection (no clipboard)
-    try:
-        focus_field(field, fallback_x, fallback_y)
-        time.sleep(0.3)
-        # clear=True borra el campo antes de escribir
-        device.send_keys(text, clear=True)
-        time.sleep(1)
-        if not verify or not resource_id:
-            log.info(f"Text entered via send_keys: {resource_id}")
-            return True
-        actual = read_field_text(device, resource_id)
-        if actual.lower() == text.lower():
-            log.info(f"Text entered via send_keys: {resource_id}")
-            return True
-        log.info(f"send_keys result: {actual!r} (expected {text!r})")
-    except Exception as exc:
-        log.info(f"send_keys failed: {exc}")
-
-    # Intento 3: keyevents ADB carácter a carácter (funciona solo en campos nativos)
-    try:
+    # Intento 1: adb keyevents (confirmado que escribe bien en Flutter+LatinIME)
+    def do_keyevents():
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
         clear_focused_text()
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
         adb_type_text(text)
-        time.sleep(1)
-    except Exception as exc:
-        log.info(f"adb keyevent fallback failed: {exc}")
 
-    screenshot(device, f"after_type_{resource_id or 'field'}")
-
-    if not verify or not resource_id:
+    result = attempt_and_verify("keyevent", do_keyevents)
+    if result:
         return True
 
-    actual = read_field_text(device, resource_id)
-    if actual.lower() == text.lower():
-        log.info(f"Text entered via adb keyevent: {resource_id}")
+    # Intento 2: send_keys (IME injection nativa de uiautomator2)
+    def do_send_keys():
+        focus_field(field, fallback_x, fallback_y)
+        time.sleep(0.3)
+        device.send_keys(text, clear=True)
+
+    result = attempt_and_verify("send_keys", do_send_keys)
+    if result:
         return True
 
-    raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
+    # Intento 3: set_text (último recurso — suele fallar dejando solo el último char)
+    def do_set_text():
+        focus_field(field, fallback_x, fallback_y)
+        time.sleep(0.3)
+        field.set_text(text)
+
+    result = attempt_and_verify("set_text", do_set_text)
+    if result:
+        return True
+
+    raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; last value: {last_actual!r}")
 
 
 def dismiss_anr(device):
@@ -594,7 +624,7 @@ def login(device):
                 email_el,
                 EMAIL,
                 resource_id="loginPage.username.textfield",
-                verify=False,
+                verify=True,
                 fallback_y=315,
             )
             time.sleep(1)
