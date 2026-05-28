@@ -323,41 +323,19 @@ def adb_send_char(char):
 
 
 def adb_type_text(text):
-    """Escribe texto en chunks alfanuméricos con input text.
+    """Escribe texto carácter a carácter por keyevent.
 
-    Envía chunks alfanuméricos con una sola llamada `adb shell input text`
-    (mucho más rápido que 39+ llamadas ADB individuales que en CI causan
-    ~60s de escritura y pérdida de caracteres por timeout). Solo usa
-    keyevent para caracteres especiales (@, ., -, _, etc.).
+    Se evita `adb shell input text` porque con LatinIME + Android 14 + Flutter
+    la composición asíncrona del IME puede colgarse indefinidamente.
+    Los keyevents por carácter evitan la cola del IME y se ha confirmado
+    visualmente que funcionan en este emulador.
 
-    Si `input text` excede el timeout en algún chunk, reintenta con
-    keyevent carácter a carácter para ese chunk como fallback.
+    Sin sleep entre caracteres porque con KVM cada keyevent tarda ~0.5s
+    y Flutter procesa los eventos en orden.
     """
-    # Separar en runs alfanuméricos y caracteres especiales
-    runs = []
-    buf = []
-    for ch in text:
-        if ch.isalnum():
-            buf.append(ch)
-        else:
-            if buf:
-                runs.append(('text', ''.join(buf)))
-                buf = []
-            runs.append(('keyevent', ch))
-    if buf:
-        runs.append(('text', ''.join(buf)))
-
-    for kind, value in runs:
-        if kind == 'text':
-            result = run_adb("shell", "input", "text", value, timeout=10)
-            if result.returncode != 0:
-                log.warning(f"input text failed (rc={result.returncode}) for '{value}' — falling back to keyevents")
-                for ch in value:
-                    adb_send_char(ch)
-                    time.sleep(0.15)
-        else:
-            adb_send_char(value)
-        time.sleep(0.1)
+    for char in text:
+        adb_send_char(char)
+        time.sleep(0.05)  # mínimo necesario para que ADB no sature al emulador
 
 
 def disable_soft_keyboard():
