@@ -196,8 +196,34 @@ def adb_input_text(text):
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "adb input text failed")
 
 
-def enter_text(device, field, text):
-    """Rellena un campo sin usar device.send_keys, que puede fallar con SecurityException."""
+def adb_keyevent_text(text):
+    """Escribe texto básico con keyevents, útil cuando Flutter ignora set_text."""
+    keycodes = {
+        "@": "KEYCODE_AT",
+        ".": "KEYCODE_PERIOD",
+        "-": "KEYCODE_MINUS",
+        "_": "KEYCODE_MINUS",
+        " ": "KEYCODE_SPACE",
+    }
+    for char in text:
+        if "a" <= char.lower() <= "z":
+            keycode = f"KEYCODE_{char.upper()}"
+        elif char.isdigit():
+            keycode = f"KEYCODE_{char}"
+        else:
+            keycode = keycodes.get(char)
+
+        if keycode:
+            result = run_adb("shell", "input", "keyevent", keycode, timeout=10)
+        else:
+            result = run_adb("shell", "input", "text", char, timeout=10)
+
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"adb keyevent failed: {char}")
+        time.sleep(0.08)
+
+
+def clear_focused_text(device):
     try:
         device.clear_text()
     except Exception:
@@ -205,13 +231,41 @@ def enter_text(device, field, text):
         run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=10)
     time.sleep(0.5)
 
-    try:
-        field.set_text(text)
-        return
-    except Exception as exc:
-        log.info(f"uiautomator set_text failed, falling back to adb input: {exc}")
 
-    adb_input_text(text)
+def read_field_text(device, resource_id):
+    try:
+        el = device(resourceId=resource_id)
+        if el.exists:
+            return el.info.get("text", "") or ""
+    except Exception:
+        pass
+    return ""
+
+
+def enter_text(device, field, text, resource_id=None, verify=True):
+    """Rellena un campo sin usar send_keys ni set_text, que fallan en CI con esta app."""
+    clear_focused_text(device)
+
+    for method_name, method in (
+        ("adb keyevents", adb_keyevent_text),
+        ("adb input text", adb_input_text),
+    ):
+        method(text)
+        time.sleep(1)
+
+        if not verify or not resource_id:
+            return True
+
+        actual = read_field_text(device, resource_id)
+        if actual.lower() == text.lower():
+            log.info(f"Text entered with {method_name}: {resource_id}")
+            return True
+
+        log.warning(f"{method_name} entered unexpected value for {resource_id}: {actual!r}")
+        clear_focused_text(device)
+
+    actual = read_field_text(device, resource_id) if resource_id else ""
+    raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
 
 
 def dismiss_anr(device):
@@ -339,7 +393,7 @@ def login(device):
             except Exception:
                 tap_adb(540, 315)
             time.sleep(1)
-            enter_text(device, email_el, EMAIL)
+            enter_text(device, email_el, EMAIL, resource_id="loginPage.username.textfield", verify=True)
             time.sleep(1)
             log.info(f"Email entered: {EMAIL}")
             filled_email = True
@@ -389,7 +443,7 @@ def login(device):
             except Exception:
                 tap_adb(540, 525)
             time.sleep(1)
-            enter_text(device, pw_el, PASSWORD)
+            enter_text(device, pw_el, PASSWORD, resource_id="loginPage.password.textfield", verify=False)
             time.sleep(1)
             log.info("Password entered")
             filled_pw = True
