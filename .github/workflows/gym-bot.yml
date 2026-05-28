@@ -18,7 +18,7 @@ on:
 jobs:
   reserva:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       FORCE_CLASS: ${{ github.event.inputs.force_class }}
 
@@ -84,7 +84,7 @@ jobs:
           script: bash run_bot.sh
 
       - name: Upload screenshots on failure
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-${{ github.run_id }}
