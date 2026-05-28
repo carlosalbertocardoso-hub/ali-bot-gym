@@ -711,7 +711,18 @@ def main():
         grant_app_permissions()
 
         device = u2.connect(DEVICE_SERIAL)
-        log.info(f"Connected: {device.info.get('productName', '?')}")
+        # uiautomator2 server puede tardar unos segundos en estar listo
+        for _attempt in range(10):
+            try:
+                info = device.info
+                log.info(f"Connected: {info.get('productName', '?')}")
+                break
+            except Exception:
+                log.info("Waiting for uiautomator2 server to be ready...")
+                time.sleep(3)
+        else:
+            log.error("uiautomator2 server never became ready — aborting")
+            return
 
         device.screen_on()
         time.sleep(2)
