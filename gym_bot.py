@@ -427,7 +427,7 @@ def login(device):
 
     # Descartar cualquier diálogo inicial hasta que veamos la pantalla de inicio
     INIT_DIALOGS = ["OK", "CONTINUE", "SKIP", "Allow", "While using the app"]
-    for _ in range(20):
+    for attempt in range(20):
         dismiss_anr(device)
         texts = get_texts(device)
         log.info(f"Login loop texts: {texts[:6]}")
@@ -459,6 +459,10 @@ def login(device):
             time.sleep(6)
             break
 
+        if device(resourceId="loginPage.username.textfield").exists:
+            log.info("Login form already visible")
+            break
+
         # Descartar diálogos de onboarding / permisos — sin timeout, solo .exists
         for dlg in INIT_DIALOGS:
             el = device(textContains=dlg)
@@ -470,6 +474,15 @@ def login(device):
                     break
                 except Exception:
                     pass
+
+        # Flutter/onboarding screens can be visually present while the
+        # accessibility tree only exposes the status-bar clock. Use the known
+        # LOG IN button area after a few blind loops.
+        if attempt in (5, 10, 15):
+            log.info("Initial screen not exposed to uiautomator — tapping LOG IN fallback")
+            screenshot(device, f"blind_login_fallback_{attempt}")
+            tap_adb(540, 1710)
+            time.sleep(6)
 
         time.sleep(3)
 
