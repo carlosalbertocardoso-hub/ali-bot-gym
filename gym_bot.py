@@ -323,20 +323,42 @@ def adb_send_char(char):
 
 
 def adb_type_text(text):
-    """Escribe carácter a carácter por keyevent.
+    """Escribe texto en chunks alfanuméricos con input text.
 
-    Razón: en Android 14 con LatinIME, `adb shell input text <largo>` puede
-    colgarse indefinidamente porque el texto pasa por el IME que compone
-    de forma asíncrona. Usar `input keyevent` evita la cola del IME.
+    Envía chunks alfanuméricos con una sola llamada `adb shell input text`
+    (mucho más rápido que 39+ llamadas ADB individuales que en CI causan
+    ~60s de escritura y pérdida de caracteres por timeout). Solo usa
+    keyevent para caracteres especiales (@, ., -, _, etc.).
 
-    En el emulador de CI hay que dejar tiempo entre teclas — los 0.05s
-    iniciales perdían caracteres porque Flutter está saturado durante el
-    primer minuto post-login y a veces el evento siguiente llega antes de
-    que el campo procese el anterior. 0.15s en CI es seguro.
+    Si `input text` excede el timeout en algún chunk, reintenta con
+    keyevent carácter a carácter para ese chunk como fallback.
     """
-    for char in text:
-        adb_send_char(char)
-        time.sleep(0.15)
+    # Separar en runs alfanuméricos y caracteres especiales
+    runs = []
+    buf = []
+    for ch in text:
+        if ch.isalnum():
+            buf.append(ch)
+        else:
+            if buf:
+                runs.append(('text', ''.join(buf)))
+                buf = []
+            runs.append(('keyevent', ch))
+    if buf:
+        runs.append(('text', ''.join(buf)))
+
+    for kind, value in runs:
+        if kind == 'text':
+            try:
+                run_adb("shell", "input", "text", value, timeout=10)
+            except subprocess.TimeoutExpired:
+                log.warning(f"input text timeout for '{value}' — falling back to keyevents")
+                for ch in value:
+                    adb_send_char(ch)
+                    time.sleep(0.15)
+        else:
+            adb_send_char(value)
+        time.sleep(0.1)
 
 
 def disable_soft_keyboard():
@@ -609,11 +631,20 @@ def login(device):
     texts = get_texts(device)
     log.info(f"Login form texts: {texts[:10]}")
 
+    # Esperar explícitamente a que el campo email aparezca en la jerarquía
+    # (Flutter puede tardar varios segundos en renderizar el formulario tras el LOG IN)
+    email_el = device(resourceId="loginPage.username.textfield")
+    for _ in range(15):
+        if email_el.exists:
+            log.info("Email field appeared in hierarchy")
+            break
+        dismiss_anr(device)
+        time.sleep(1)
+
     # Paso 1: email
     filled_email = False
     for attempt in range(5):
         dismiss_anr(device)
-        email_el = device(resourceId="loginPage.username.textfield")
         if email_el.exists:
             try:
                 b = email_el.info.get("bounds", {})
