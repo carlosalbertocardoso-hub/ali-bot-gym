@@ -22,7 +22,7 @@ from datetime import datetime
 EMAIL = "aliciaramirezcaballero@gmail.com"
 PASSWORD = "gimnasio"
 APP_PACKAGE = "com.technogym.tgapp"
-LATIN_IME = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"
+ADBKEYBOARD_IME = "com.android.adbkeyboard/.AdbIME"
 DEVICE_SERIAL = os.environ.get("DEVICE_SERIAL", "emulator-5554")
 AVD_NAME = "GymBotPlayAVD"
 BASE_DIR = os.path.dirname(__file__)
@@ -176,20 +176,19 @@ def enable_soft_keyboard():
 
 
 def use_android_keyboard():
-    """Configura el teclado Android.
+    """Activa AdbKeyboard como IME por defecto.
 
-    Importante: no forzamos LatinIME porque su composición asíncrona puede
-    hacer que `adb shell input text` se cuelgue indefinidamente en Android 14.
-    El bot escribe credenciales con keyevents por carácter, que funcionan
-    independientemente del IME activo.
+    AdbKeyboard acepta `adb shell input text` sin composición asíncrona,
+    por lo que no se cuelga en Android 14 como LatinIME.
+    run_bot.sh instala el APK y lo habilita antes de lanzar este script.
+    Aquí solo lo activamos (por si algo lo cambió entre instalación y uso).
     """
     enable_soft_keyboard()
-    # Intentar LatinIME por si más tarde necesitamos set_text como fallback.
-    result = run_adb("shell", "ime", "set", LATIN_IME, timeout=5)
+    result = run_adb("shell", "ime", "set", ADBKEYBOARD_IME, timeout=5)
     if result.returncode != 0:
-        log.warning(f"Could not switch to LatinIME: {(result.stdout + result.stderr).strip()}")
+        log.warning(f"Could not switch to AdbKeyboard: {(result.stdout + result.stderr).strip()}")
     else:
-        log.info("Android LatinIME keyboard enabled")
+        log.info("AdbKeyboard IME enabled")
 
 
 def log_keyboard_state(label):
@@ -289,55 +288,21 @@ def focus_field(field, fallback_x, fallback_y):
         tap_adb(fallback_x, fallback_y)
 
 
-ADB_KEYCODES = {
-    "@": "KEYCODE_AT",
-    ".": "KEYCODE_PERIOD",     # el punto del .com
-    "_": "KEYCODE_UNDERSCORE",
-    "-": "KEYCODE_MINUS",
-    "+": "KEYCODE_PLUS",
-    "/": "KEYCODE_SLASH",
-}
-
-# Mapping for letters/digits — using direct KEYCODE_X / KEYCODE_NUM_X.
-# Letters are uppercase, lowercase is achieved by NOT pressing shift.
-def _char_keycode(char):
-    if char.isalpha():
-        return f"KEYCODE_{char.upper()}"
-    if char.isdigit():
-        return f"KEYCODE_{char}"
-    return ADB_KEYCODES.get(char)
-
-
-def adb_send_char(char):
-    """Envía un carácter por keyevent. Evita 'input text' (puede colgarse con IME)."""
-    keycode = _char_keycode(char)
-    if not keycode:
-        # Fallback: usar input text de forma protegida con timeout corto.
-        safe = char.replace("%", "%25").replace(" ", "%s")
-        run_adb("shell", "input", "text", safe, timeout=5)
-        return
-    if char.isalpha() and char.isupper():
-        run_adb("shell", "input", "keyevent", "KEYCODE_SHIFT_LEFT", keycode, timeout=5)
-    else:
-        run_adb("shell", "input", "keyevent", keycode, timeout=5)
-
-
 def adb_type_text(text):
-    """Escribe texto carácter a carácter por keyevent.
+    """Escribe texto con `adb shell input text` via AdbKeyboard IME.
 
-    Se evita `adb shell input text` porque con LatinIME + Android 14 + Flutter
-    la composición asíncrona del IME puede colgarse indefinidamente.
-    Los keyevents por carácter evitan la cola del IME y se ha confirmado
-    visualmente que funcionan en este emulador.
+    AdbKeyboard no usa composición asíncrona, por lo que no se cuelga como
+    LatinIME en Android 14. Requiere que AdbKeyboard esté instalado y activo
+    (lo hace run_bot.sh antes de lanzar este script).
 
-    Delay de 0.15s entre caracteres para evitar pérdida en CI durante la
-    saturación de Flutter en el primer minuto post-startup. El emulador puede
-    estar usando traducción binaria (arm64_v8a en x86_64) o simplemente estar
-    saturado en los primeros segundos.
+    `%` necesita escape a `%s` para el espacio y `%25` para el literal.
+    `@` y otros caracteres especiales pasan sin problema con AdbKeyboard.
     """
-    for char in text:
-        adb_send_char(char)
-        time.sleep(0.15)  # necesario en CI para que Flutter procese cada keyevent
+    # Escape de caracteres que adb shell input text interpreta
+    safe = text.replace("%", "%25").replace(" ", "%s")
+    result = run_adb("shell", "input", "text", safe, timeout=30)
+    if result.returncode != 0 and result.returncode != 124:
+        log.warning(f"adb input text returned {result.returncode}: {result.stderr.strip()}")
 
 
 def disable_soft_keyboard():
@@ -438,8 +403,8 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
     time.sleep(0.5)
     log_keyboard_state("before_type")
 
-    # Intento 1: adb keyevents carácter a carácter (más fiable)
-    def do_keyevents():
+    # Intento 1: adb input text via AdbKeyboard (sin composición asíncrona)
+    def do_input_text():
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
         clear_focused_text()
@@ -447,7 +412,7 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
         time.sleep(0.3)
         adb_type_text(text)
 
-    result = attempt_and_verify("keyevent", do_keyevents)
+    result = attempt_and_verify("input_text", do_input_text)
     if result:
         return True
 
