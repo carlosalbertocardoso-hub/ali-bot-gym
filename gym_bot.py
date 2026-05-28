@@ -330,12 +330,14 @@ def adb_type_text(text):
     Los keyevents por carácter evitan la cola del IME y se ha confirmado
     visualmente que funcionan en este emulador.
 
-    Sin sleep entre caracteres porque con KVM cada keyevent tarda ~0.5s
-    y Flutter procesa los eventos en orden.
+    Delay de 0.15s entre caracteres para evitar pérdida en CI durante la
+    saturación de Flutter en el primer minuto post-startup. El emulador puede
+    estar usando traducción binaria (arm64_v8a en x86_64) o simplemente estar
+    saturado en los primeros segundos.
     """
     for char in text:
         adb_send_char(char)
-        time.sleep(0.05)  # mínimo necesario para que ADB no sature al emulador
+        time.sleep(0.15)  # necesario en CI para que Flutter procese cada keyevent
 
 
 def disable_soft_keyboard():
@@ -347,11 +349,11 @@ def disable_soft_keyboard():
 
 
 def clear_focused_text():
-    # Selecciona todo y borra de una sola pulsación, en lugar de 80 DEL secuenciales.
-    run_adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", timeout=5)
-    # Ctrl+A no funciona universalmente, así que combinamos: move end + N backspaces.
-    for _ in range(60):
-        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
+    # Selecciona todo con KEYCODE_SELECT_ALL y borra todo de una vez.
+    # Más fiable que move_end + múltiples DEL.
+    run_adb("shell", "input", "keyevent", "KEYCODE_SELECT_ALL", timeout=5)
+    time.sleep(0.2)
+    run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
     time.sleep(0.3)
 
 
@@ -396,13 +398,15 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
          al campo Flutter via el LatinIME activo (captura `after_adb_type_*`
          mostraba el email completo y bien escrito).
       2. send_keys de uiautomator2 — IME injection alternativa.
-      3. field.set_text() — último recurso; en Flutter suele dejar solo el
-         último carácter pero a veces funciona.
+
+    NOTA: Se removió set_text() porque en Flutter suele dejar solo el
+    último carácter, causando corrupción del campo cuando se ejecuta
+    después de keyevents (p.ej. email con "y" extra al final).
 
     Verificación: Flutter no expone el texto en la jerarquía de accesibilidad,
     por lo que `read_field_text()` puede devolver "" aunque el texto esté ahí.
     Solo consideramos fallo confirmado si devuelve un texto no vacío y distinto
-    del esperado (síntoma del bug de set_text con "y").
+    del esperado.
     """
     last_actual = ""
 
@@ -434,13 +438,11 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
     time.sleep(0.5)
     log_keyboard_state("before_type")
 
-    # Intento 1: adb keyevents + input text (combinado)
+    # Intento 1: adb keyevents carácter a carácter (más fiable)
     def do_keyevents():
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
-        # Borrar texto existente con 2 DEL (campo suele estar vacío de inicio)
-        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
-        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
+        clear_focused_text()
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
         adb_type_text(text)
@@ -456,16 +458,6 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
         device.send_keys(text, clear=True)
 
     result = attempt_and_verify("send_keys", do_send_keys)
-    if result:
-        return True
-
-    # Intento 3: set_text (último recurso — suele fallar dejando solo el último char)
-    def do_set_text():
-        focus_field(field, fallback_x, fallback_y)
-        time.sleep(0.3)
-        field.set_text(text)
-
-    result = attempt_and_verify("set_text", do_set_text)
     if result:
         return True
 
