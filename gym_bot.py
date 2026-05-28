@@ -249,15 +249,22 @@ def login(device):
         login_btn = device(resourceId="onboarding.alreadySignedIn.button")
         if login_btn.exists:
             log.info("Initial screen detected — tapping LOG IN")
-            login_btn.click()
-            time.sleep(4)
+            try:
+                info = login_btn.info
+                bounds = info.get("bounds", {})
+                cx = (bounds.get("left", 0) + bounds.get("right", 1080)) // 2
+                cy = (bounds.get("top", 0) + bounds.get("bottom", 1920)) // 2
+                log.info(f"  LOG IN bounds: {bounds}, tapping ({cx}, {cy})")
+                tap_adb(cx, cy)
+            except Exception:
+                tap_adb(540, 1710)
+            time.sleep(6)
             break
 
         if any("LOG IN" in t or "Log in" in t for t in texts):
             log.info("Initial screen (text fallback) — tapping LOG IN")
-            if not click_text(device, "LOG IN", timeout=5):
-                tap_adb(540, 1710)
-            time.sleep(4)
+            tap_adb(540, 1710)
+            time.sleep(6)
             break
 
         # Descartar diálogos de onboarding / permisos — sin timeout, solo .exists
@@ -770,16 +777,23 @@ def main():
         time.sleep(2)
 
         # Esperar a que el sistema esté estable (descartar ANR del Launcher)
+        # Requiere 3 ciclos consecutivos sin ANR antes de continuar
         log.info("Waiting for system to stabilize...")
-        for _ in range(20):
+        stable_count = 0
+        for _ in range(30):
             xml = device.dump_hierarchy()
             if "isn't responding" in xml or "not responding" in xml.lower():
                 log.info("System ANR during startup — tapping Wait")
                 tap_adb(350, 1090)
-                time.sleep(3)
+                stable_count = 0
+                time.sleep(4)
             else:
-                time.sleep(2)
-                break
+                stable_count += 1
+                log.info(f"  System stable {stable_count}/3")
+                if stable_count >= 3:
+                    log.info("System stabilized")
+                    break
+                time.sleep(3)
 
         device.app_stop(APP_PACKAGE)
         time.sleep(3)
