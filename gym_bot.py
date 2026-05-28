@@ -171,6 +171,17 @@ def use_android_keyboard():
         log.info("Android LatinIME keyboard enabled")
 
 
+def log_keyboard_state(label):
+    try:
+        result = run_adb("shell", "dumpsys", "input_method", timeout=10)
+        output = result.stdout
+        shown = "mInputShown=true" in output or "inputShown=true" in output
+        current = re.search(r"mCurMethodId=([^\s]+)", output)
+        log.info(f"{label} keyboard state: shown={shown}, ime={current.group(1) if current else '?'}")
+    except Exception as exc:
+        log.info(f"{label} keyboard state unavailable: {exc}")
+
+
 def connect_uiautomator():
     last_error = None
     for attempt in range(1, 11):
@@ -275,10 +286,17 @@ def read_field_text(device, resource_id):
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
     """Rellena un campo tocando el teclado Android visible."""
     focus_field(field, fallback_x, fallback_y)
+    log_keyboard_state("before_clear")
+    screenshot(device, f"keyboard_before_clear_{resource_id or 'field'}")
     clear_focused_text()
     focus_field(field, fallback_x, fallback_y)
+    time.sleep(1)
+    log_keyboard_state("before_type")
+    screenshot(device, f"keyboard_before_type_{resource_id or 'field'}")
     tap_android_keyboard_text(text)
     time.sleep(1)
+    log_keyboard_state("after_type")
+    screenshot(device, f"keyboard_after_type_{resource_id or 'field'}")
 
     if not verify or not resource_id:
         return True
