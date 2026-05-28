@@ -169,7 +169,17 @@ def ensure_adb_keyboard():
         ime_list = run_adb("shell", "ime", "list", "-s", timeout=10).stdout
         if ADB_KEYBOARD_IME not in ime_list:
             with with_package_resource("assets/app-uiautomator.apk") as apk_path:
-                run_adb("install", "-r", str(apk_path), timeout=60)
+                log.info(f"Installing AdbKeyboard IME from {apk_path}")
+                install = run_adb("install", "-r", "-d", "-g", str(apk_path), timeout=90)
+                install_output = (install.stdout + install.stderr).strip()
+                log.info(f"AdbKeyboard install output: {install_output}")
+                if install.returncode != 0:
+                    run_adb("uninstall", "com.github.uiautomator", timeout=30)
+                    install = run_adb("install", "-r", "-d", "-g", str(apk_path), timeout=90)
+                    install_output = (install.stdout + install.stderr).strip()
+                    log.info(f"AdbKeyboard reinstall output: {install_output}")
+                    if install.returncode != 0:
+                        raise RuntimeError(install_output or "adb install failed")
 
         deadline = time.time() + 30
         while time.time() < deadline:
@@ -178,11 +188,21 @@ def ensure_adb_keyboard():
                 break
             time.sleep(1)
         else:
-            raise RuntimeError("AdbKeyboard did not appear in IME list")
+            package_path = run_adb("shell", "pm", "path", "com.github.uiautomator", timeout=10)
+            raise RuntimeError(
+                "AdbKeyboard did not appear in IME list; "
+                f"ime_list={ime_list!r}; package={package_path.stdout.strip()!r}; "
+                f"package_err={package_path.stderr.strip()!r}"
+            )
 
-        run_adb("shell", "ime", "enable", ADB_KEYBOARD_IME, timeout=10)
-        run_adb("shell", "ime", "set", ADB_KEYBOARD_IME, timeout=10)
-        run_adb("shell", "settings", "put", "secure", "default_input_method", ADB_KEYBOARD_IME, timeout=10)
+        for args in (
+            ("shell", "ime", "enable", ADB_KEYBOARD_IME),
+            ("shell", "ime", "set", ADB_KEYBOARD_IME),
+            ("shell", "settings", "put", "secure", "default_input_method", ADB_KEYBOARD_IME),
+        ):
+            result = run_adb(*args, timeout=10)
+            if result.returncode != 0:
+                raise RuntimeError((result.stdout + result.stderr).strip() or f"adb {' '.join(args)} failed")
         log.info("AdbKeyboard IME enabled")
     except Exception as exc:
         raise RuntimeError(f"Could not enable AdbKeyboard IME: {exc}") from exc
