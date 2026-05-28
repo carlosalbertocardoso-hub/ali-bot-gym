@@ -717,7 +717,8 @@ def login(device):
                                 "daily moves", "technogym milano"]
     LOGIN_FORM_INDICATORS = ["loginpage.username.textfield", "loginpage.password.textfield",
                              "loginpage.login.button", "loginpage.next.button"]
-    DIALOG_TEXTS = ["CONTINUE", "SKIP", "OK", "Allow",
+    DIALOG_TEXTS = ["MAYBE LATER", "Maybe Later", "Not now", "No thanks",
+                    "CONTINUE", "SKIP", "OK", "Allow",
                     "While using the app", "Only this time",
                     "START", "Empezar", "Siguiente", "ACEPTAR",
                     "Permitir", "Mientras se usa la app", "Solo esta vez"]
