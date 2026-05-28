@@ -291,7 +291,7 @@ def focus_field(field, fallback_x, fallback_y):
 
 ADB_KEYCODES = {
     "@": "KEYCODE_AT",
-    ".": "KEYCODE_PERIOD",
+    ".": "KEYCODE_PERIOD",     # el punto del .com
     "_": "KEYCODE_UNDERSCORE",
     "-": "KEYCODE_MINUS",
     "+": "KEYCODE_PLUS",
@@ -349,10 +349,9 @@ def adb_type_text(text):
 
     for kind, value in runs:
         if kind == 'text':
-            try:
-                run_adb("shell", "input", "text", value, timeout=10)
-            except subprocess.TimeoutExpired:
-                log.warning(f"input text timeout for '{value}' — falling back to keyevents")
+            result = run_adb("shell", "input", "text", value, timeout=10)
+            if result.returncode != 0:
+                log.warning(f"input text failed (rc={result.returncode}) for '{value}' — falling back to keyevents")
                 for ch in value:
                     adb_send_char(ch)
                     time.sleep(0.15)
@@ -457,11 +456,13 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
     time.sleep(0.5)
     log_keyboard_state("before_type")
 
-    # Intento 1: adb keyevents (confirmado que escribe bien en Flutter+LatinIME)
+    # Intento 1: adb keyevents + input text (combinado)
     def do_keyevents():
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
-        clear_focused_text()
+        # Borrar texto existente con 2 DEL (campo suele estar vacío de inicio)
+        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
+        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=5)
         focus_field(field, fallback_x, fallback_y)
         time.sleep(0.3)
         adb_type_text(text)
