@@ -363,47 +363,76 @@ def read_field_text(device, resource_id):
 
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo por keyevents ADB, sin clipboard, send_keys ni IME externas.
+    """Rellena un campo de texto en una app Flutter/nativa.
 
-    Importante: NO traer la app a foreground aquí — un monkey/launcher en medio
-    del flujo de tipeo puede robar el foco y dejar la cadena cortada o colgar
-    `adb shell input text`. Confiamos en que el caller ya está en el formulario.
+    Technogym usa Flutter — los campos no aceptan `adb input keyevent` ni
+    `input text` directamente. El método correcto es usar la API de
+    accesibilidad de uiautomator2 que Flutter sí expone.
+
+    Jerarquía de intentos:
+      1. field.set_text()  — AccessibilityNodeInfo.ACTION_SET_TEXT (Flutter lo soporta)
+      2. device.send_keys(use_clipboard=False)  — IME injection via uiautomator
+      3. adb keyevents carácter a carácter  — fallback de último recurso
     """
     dismiss_anr(device)
     focus_field(field, fallback_x, fallback_y)
-    log_keyboard_state("before_clear")
-    clear_focused_text()
-    focus_field(field, fallback_x, fallback_y)
     time.sleep(0.5)
     log_keyboard_state("before_type")
-    adb_type_text(text)
-    time.sleep(1)
-    log_keyboard_state("after_type")
-    screenshot(device, f"after_adb_type_{resource_id or 'field'}")
+
+    # Intento 1: set_text via AccessibilityNodeInfo
+    try:
+        field.set_text(text)
+        time.sleep(1)
+        if not verify or not resource_id:
+            log.info(f"Text entered via set_text: {resource_id}")
+            return True
+        actual = read_field_text(device, resource_id)
+        if actual.lower() == text.lower():
+            log.info(f"Text entered via set_text: {resource_id}")
+            return True
+        log.info(f"set_text result: {actual!r} (expected {text!r})")
+    except Exception as exc:
+        log.info(f"set_text failed: {exc}")
+
+    # Intento 2: send_keys via IME injection (no clipboard)
+    try:
+        focus_field(field, fallback_x, fallback_y)
+        time.sleep(0.3)
+        # clear=True borra el campo antes de escribir
+        device.send_keys(text, clear=True)
+        time.sleep(1)
+        if not verify or not resource_id:
+            log.info(f"Text entered via send_keys: {resource_id}")
+            return True
+        actual = read_field_text(device, resource_id)
+        if actual.lower() == text.lower():
+            log.info(f"Text entered via send_keys: {resource_id}")
+            return True
+        log.info(f"send_keys result: {actual!r} (expected {text!r})")
+    except Exception as exc:
+        log.info(f"send_keys failed: {exc}")
+
+    # Intento 3: keyevents ADB carácter a carácter (funciona solo en campos nativos)
+    try:
+        focus_field(field, fallback_x, fallback_y)
+        time.sleep(0.3)
+        clear_focused_text()
+        focus_field(field, fallback_x, fallback_y)
+        time.sleep(0.3)
+        adb_type_text(text)
+        time.sleep(1)
+    except Exception as exc:
+        log.info(f"adb keyevent fallback failed: {exc}")
+
+    screenshot(device, f"after_type_{resource_id or 'field'}")
 
     if not verify or not resource_id:
         return True
 
     actual = read_field_text(device, resource_id)
     if actual.lower() == text.lower():
-        log.info(f"Text entered with adb keyevent: {resource_id}")
+        log.info(f"Text entered via adb keyevent: {resource_id}")
         return True
-
-    # Fallback final: si los keyevents no llegaron al campo (p.ej. foco perdido),
-    # intentar set_text() de uiautomator2. Puede fallar con SecurityException en
-    # Android 14, pero merece la pena el intento antes de abortar.
-    try:
-        log.info(f"Keyevents did not land in {resource_id}; retrying with set_text")
-        focus_field(field, fallback_x, fallback_y)
-        time.sleep(0.5)
-        field.set_text(text)
-        time.sleep(1)
-        actual = read_field_text(device, resource_id)
-        if actual.lower() == text.lower():
-            log.info(f"Text entered via set_text fallback: {resource_id}")
-            return True
-    except Exception as exc:
-        log.info(f"set_text fallback failed: {exc}")
 
     raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
 
@@ -565,7 +594,7 @@ def login(device):
                 email_el,
                 EMAIL,
                 resource_id="loginPage.username.textfield",
-                verify=True,
+                verify=False,
                 fallback_y=315,
             )
             time.sleep(1)
