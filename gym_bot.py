@@ -171,6 +171,21 @@ def use_android_keyboard():
         log.info("Android LatinIME keyboard enabled")
 
 
+def connect_uiautomator():
+    last_error = None
+    for attempt in range(1, 11):
+        try:
+            device = u2.connect(DEVICE_SERIAL)
+            info = device.info
+            log.info(f"Connected: {info.get('productName', '?')}")
+            return device
+        except Exception as exc:
+            last_error = exc
+            log.info(f"Waiting for uiautomator2 server to be ready ({attempt}/10): {exc}")
+            time.sleep(3)
+    raise RuntimeError(f"uiautomator2 server never became ready: {last_error}") from last_error
+
+
 # ============================================================
 # UI HELPERS
 # ============================================================
@@ -954,21 +969,9 @@ def main():
     try:
         ensure_emulator()
         grant_app_permissions()
-        use_android_keyboard()
 
-        device = u2.connect(DEVICE_SERIAL)
-        # uiautomator2 server puede tardar unos segundos en estar listo
-        for _attempt in range(10):
-            try:
-                info = device.info
-                log.info(f"Connected: {info.get('productName', '?')}")
-                break
-            except Exception:
-                log.info("Waiting for uiautomator2 server to be ready...")
-                time.sleep(3)
-        else:
-            log.error("uiautomator2 server never became ready — aborting")
-            return
+        device = connect_uiautomator()
+        use_android_keyboard()
 
         device.screen_on()
         time.sleep(2)
