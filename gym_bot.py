@@ -281,50 +281,120 @@ def login(device):
 
         time.sleep(3)
 
-    # Rellenar formulario de login
+    # Rellenar formulario de login — flujo de dos pasos: email→NEXT, password→NEXT
     time.sleep(3)
     screenshot(device, "login_form")
     texts = get_texts(device)
     log.info(f"Login form texts: {texts[:10]}")
 
-    # El formulario puede usar placeholders "Email" / "Password"
-    # o campos vacíos identificables por resource-id
-    filled = False
-    for attempt in range(3):
+    # Paso 1: email
+    filled_email = False
+    for attempt in range(5):
         dismiss_anr(device)
-
         email_el = device(resourceId="loginPage.username.textfield")
         if email_el.exists:
-            email_el.click()
+            try:
+                b = email_el.info.get("bounds", {})
+                cx = (b.get("left", 0) + b.get("right", 1080)) // 2
+                cy = (b.get("top", 0) + b.get("bottom", 400)) // 2
+                tap_adb(cx, cy)
+            except Exception:
+                tap_adb(540, 315)
             time.sleep(1)
-            email_el.set_text(EMAIL)
+            device.clear_text()
+            time.sleep(0.5)
+            device.send_keys(EMAIL, clear=False)
+            time.sleep(1)
             log.info(f"Email entered: {EMAIL}")
-
-            pw_el = device(resourceId="loginPage.password.textfield")
-            pw_el.click()
-            time.sleep(1)
-            pw_el.set_text(PASSWORD)
-            log.info("Password entered")
-
-            device.press("enter")
-            time.sleep(2)
-            filled = True
+            filled_email = True
             break
-
         time.sleep(2)
 
-    if not filled:
-        log.warning("Could not find login form fields")
+    if not filled_email:
+        log.warning("Could not find email field")
         screenshot(device, "login_form_not_found")
         return False
 
-    # Pulsar botón de login
-    login_btn = device(resourceId="loginPage.login.button")
-    if login_btn.exists:
-        login_btn.click()
-        log.info("  Clicked login button")
+    # Pulsar NEXT para avanzar al paso de password
+    next_btn = device(resourceId="loginPage.next.button")
+    if next_btn.exists:
+        try:
+            b = next_btn.info.get("bounds", {})
+            cx = (b.get("left", 0) + b.get("right", 1080)) // 2
+            cy = (b.get("top", 0) + b.get("bottom", 1920)) // 2
+            tap_adb(cx, cy)
+        except Exception:
+            tap_adb(540, 1328)
     else:
-        click_if_present(device, "LOG IN", "LOGIN", "Log in", timeout=6)
+        # NEXT por texto o coordenada fija (abajo de pantalla)
+        el = device(text="NEXT")
+        if el.exists:
+            try:
+                b = el.info.get("bounds", {})
+                tap_adb((b["left"]+b["right"])//2, (b["top"]+b["bottom"])//2)
+            except Exception:
+                tap_adb(540, 1328)
+        else:
+            tap_adb(540, 1328)
+    log.info("Tapped NEXT after email")
+    time.sleep(3)
+
+    # Paso 2: password
+    filled_pw = False
+    for attempt in range(5):
+        dismiss_anr(device)
+        pw_el = device(resourceId="loginPage.password.textfield")
+        if pw_el.exists:
+            try:
+                b = pw_el.info.get("bounds", {})
+                cx = (b.get("left", 0) + b.get("right", 1080)) // 2
+                cy = (b.get("top", 0) + b.get("bottom", 600)) // 2
+                tap_adb(cx, cy)
+            except Exception:
+                tap_adb(540, 525)
+            time.sleep(1)
+            device.clear_text()
+            time.sleep(0.5)
+            device.send_keys(PASSWORD, clear=False)
+            time.sleep(1)
+            log.info("Password entered")
+            filled_pw = True
+            break
+        time.sleep(2)
+
+    if not filled_pw:
+        log.warning("Could not find password field")
+        screenshot(device, "login_pw_not_found")
+        return False
+
+    # Pulsar NEXT / LOGIN para enviar
+    login_btn = device(resourceId="loginPage.login.button")
+    next_btn2 = device(resourceId="loginPage.next.button")
+    if login_btn.exists:
+        try:
+            b = login_btn.info.get("bounds", {})
+            tap_adb((b["left"]+b["right"])//2, (b["top"]+b["bottom"])//2)
+        except Exception:
+            tap_adb(540, 1328)
+        log.info("  Clicked login button")
+    elif next_btn2.exists:
+        try:
+            b = next_btn2.info.get("bounds", {})
+            tap_adb((b["left"]+b["right"])//2, (b["top"]+b["bottom"])//2)
+        except Exception:
+            tap_adb(540, 1328)
+        log.info("  Clicked NEXT (login step)")
+    else:
+        el = device(text="NEXT")
+        if el.exists:
+            try:
+                b = el.info.get("bounds", {})
+                tap_adb((b["left"]+b["right"])//2, (b["top"]+b["bottom"])//2)
+            except Exception:
+                tap_adb(540, 1328)
+        else:
+            tap_adb(540, 1328)
+        log.info("  Tapped NEXT/LOGIN by fallback")
 
     log.info("Waiting for login to complete...")
     time.sleep(8)
