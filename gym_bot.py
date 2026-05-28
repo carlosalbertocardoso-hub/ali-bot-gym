@@ -170,6 +170,18 @@ def get_texts(device):
     return [t for t in re.findall(r'text="([^"]+)"', xml) if t.strip()]
 
 
+def xml_visible_strings(xml):
+    values = []
+    for attr in ("text", "content-desc", "resource-id"):
+        values.extend(v for v in re.findall(fr'{attr}="([^"]+)"', xml) if v.strip())
+    return values
+
+
+def xml_contains_any(xml, needles):
+    haystack = xml.lower()
+    return any(needle.lower() in haystack for needle in needles)
+
+
 def tap_adb(x, y):
     """Tap directo por ADB cuando uiautomator2 no responde."""
     run_adb("shell", "input", "tap", str(x), str(y), timeout=10)
@@ -422,41 +434,49 @@ def login(device):
     time.sleep(8)
     screenshot(device, "after_login")
 
-    # Descartar posibles diálogos post-login (permisos, tutorial, onboarding)
-    # En un emulador fresco la app puede tardar 3-4 min en cargar el club
-    HOME_INDICATORS = ["COLECTIVAS", "Colectivas", "Reserva una clase", "Tus citas",
-                       "Entrenador", "Explorar", "MOVERGY", "Tus planes"]
+    # Descartar posibles diálogos post-login (permisos, tutorial, onboarding).
+    # En CI importa distinguir login fallido de app autenticada pero lenta.
+    HOME_INDICATORS = ["colectivas", "reserva una clase", "tus citas", "entrenador",
+                       "explorar", "movergy", "tus planes", "sports center", "mercantil"]
+    AUTHENTICATED_INDICATORS = [EMAIL.lower(), "home", "workouts", "find a club",
+                                "daily moves", "technogym milano"]
+    LOGIN_FORM_INDICATORS = ["loginpage.username.textfield", "loginpage.password.textfield",
+                             "loginpage.login.button", "loginpage.next.button"]
     DIALOG_TEXTS = ["CONTINUE", "SKIP", "OK", "Allow",
                     "While using the app", "Only this time",
-                    "START", "Empezar", "Siguiente", "ACEPTAR"]
+                    "START", "Empezar", "Siguiente", "ACEPTAR",
+                    "Permitir", "Mientras se usa la app", "Solo esta vez"]
     for i in range(40):
         dismiss_anr(device)
         xml = device.dump_hierarchy()
-        texts = [t for t in re.findall(r'text="([^"]+)"', xml) if t.strip()]
-        log.info(f"  Post-login iter {i+1}/40 texts: {texts[:15]}")
+        visible = xml_visible_strings(xml)
+        log.info(f"  Post-login iter {i+1}/40 visible: {visible[:20]}")
 
-        # Guardar XML y screenshot ADB cada 5 iteraciones para diagnóstico
-        if i % 5 == 0:
-            try:
-                xml_path = os.path.join(BASE_DIR, f"postlogin_iter{i+1:02d}.xml")
-                with open(xml_path, "w", encoding="utf-8") as f:
-                    f.write(xml)
-            except Exception:
-                pass
-            try:
-                img_path = os.path.join(SCREENSHOT_DIR, f"postlogin_iter{i+1:02d}.png")
-                result = subprocess.run(
-                    [adb_path(), "-s", DEVICE_SERIAL, "exec-out", "screencap", "-p"],
-                    capture_output=True, timeout=15
-                )
-                if result.returncode == 0 and result.stdout:
-                    with open(img_path, "wb") as f:
-                        f.write(result.stdout)
-            except Exception:
-                pass
+        # Guardar XML y screenshot ADB en cada iteración para diagnóstico del artifact.
+        try:
+            xml_path = os.path.join(BASE_DIR, f"postlogin_iter{i+1:02d}.xml")
+            with open(xml_path, "w", encoding="utf-8") as f:
+                f.write(xml)
+        except Exception:
+            pass
+        try:
+            img_path = os.path.join(SCREENSHOT_DIR, f"postlogin_iter{i+1:02d}.png")
+            result = subprocess.run(
+                [adb_path(), "-s", DEVICE_SERIAL, "exec-out", "screencap", "-p"],
+                capture_output=True, timeout=15
+            )
+            if result.returncode == 0 and result.stdout:
+                with open(img_path, "wb") as f:
+                    f.write(result.stdout)
+        except Exception:
+            pass
 
-        if any(t in texts for t in HOME_INDICATORS):
+        if xml_contains_any(xml, HOME_INDICATORS):
             log.info("Club home reached")
+            return True
+
+        if xml_contains_any(xml, AUTHENTICATED_INDICATORS) and not xml_contains_any(xml, LOGIN_FORM_INDICATORS):
+            log.info("Authenticated Technogym home reached (club-specific home not visible yet)")
             return True
 
         # Descarte rápido de diálogos — sin timeout, solo .exists
@@ -470,6 +490,14 @@ def login(device):
                     break
                 except Exception:
                     pass
+
+        # Si se queda mucho tiempo en loading, relanzar una vez la app suele destrabar Flutter/WebView.
+        if i == 20 and "contentloading" in xml.lower():
+            log.info("Post-login still loading after ~100s — restarting app once")
+            device.app_stop(APP_PACKAGE)
+            time.sleep(3)
+            device.app_start(APP_PACKAGE)
+            time.sleep(15)
 
         time.sleep(5)
 
