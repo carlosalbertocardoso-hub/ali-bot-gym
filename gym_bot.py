@@ -152,6 +152,14 @@ def grant_app_permissions():
             pass
 
 
+def enable_soft_keyboard():
+    """Muestra el teclado Android aunque el emulador tenga teclado hardware."""
+    try:
+        run_adb("shell", "settings", "put", "secure", "show_ime_with_hard_keyboard", "1", timeout=10)
+    except Exception:
+        pass
+
+
 # ============================================================
 # UI HELPERS
 # ============================================================
@@ -188,20 +196,6 @@ def tap_adb(x, y):
     time.sleep(1)
 
 
-def adb_input_text(text):
-    """Escribe texto con ADB, evitando clipboard/IME de uiautomator2 en Android 14."""
-    escaped = text.replace("%", "%25").replace(" ", "%s")
-    result = run_adb("shell", "input", "text", escaped, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "adb input text failed")
-
-
-def adb_input_text_chars(text):
-    for char in text:
-        adb_input_text(char)
-        time.sleep(0.08)
-
-
 def focus_field(field, fallback_x, fallback_y):
     try:
         b = field.info.get("bounds", {})
@@ -232,18 +226,16 @@ def adb_keyevent_text(text):
         if keycode:
             result = run_adb("shell", "input", "keyevent", keycode, timeout=10)
         else:
-            result = run_adb("shell", "input", "text", char, timeout=10)
+            raise RuntimeError(f"Unsupported keyboard character: {char!r}")
 
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"adb keyevent failed: {char}")
         time.sleep(0.08)
 
 
-def clear_focused_text(device):
-    try:
-        device.clear_text()
-    except Exception:
-        run_adb("shell", "input", "keyevent", "KEYCODE_CTRL_LEFT", "KEYCODE_A", timeout=10)
+def clear_focused_text():
+    run_adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", timeout=10)
+    for _ in range(80):
         run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=10)
     time.sleep(0.5)
 
@@ -259,31 +251,21 @@ def read_field_text(device, resource_id):
 
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo sin usar send_keys ni set_text, que fallan en CI con esta app."""
+    """Rellena un campo con el teclado Android, sin clipboard, set_text ni input text."""
     focus_field(field, fallback_x, fallback_y)
-    clear_focused_text(device)
+    clear_focused_text()
+    focus_field(field, fallback_x, fallback_y)
+    adb_keyevent_text(text)
+    time.sleep(1)
 
-    for method_name, method in (
-        ("adb keyevents", adb_keyevent_text),
-        ("adb input text chars", adb_input_text_chars),
-    ):
-        focus_field(field, fallback_x, fallback_y)
-        method(text)
-        time.sleep(1)
+    if not verify or not resource_id:
+        return True
 
-        if not verify or not resource_id:
-            return True
+    actual = read_field_text(device, resource_id)
+    if actual.lower() == text.lower():
+        log.info(f"Text entered with Android keyboard: {resource_id}")
+        return True
 
-        actual = read_field_text(device, resource_id)
-        if actual.lower() == text.lower():
-            log.info(f"Text entered with {method_name}: {resource_id}")
-            return True
-
-        log.warning(f"{method_name} entered unexpected value for {resource_id}: {actual!r}")
-        focus_field(field, fallback_x, fallback_y)
-        clear_focused_text(device)
-
-    actual = read_field_text(device, resource_id) if resource_id else ""
     raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
 
 
@@ -965,6 +947,7 @@ def main():
     try:
         ensure_emulator()
         grant_app_permissions()
+        enable_soft_keyboard()
 
         device = u2.connect(DEVICE_SERIAL)
         # uiautomator2 server puede tardar unos segundos en estar listo
