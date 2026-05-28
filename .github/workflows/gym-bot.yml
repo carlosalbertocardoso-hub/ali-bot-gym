@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       force_class:
-        description: 'Forzar clase: "NOMBRE,HH:MM,dia_semana" (ej: AEROSTYLOS,18:00,2)'
+        description: 'Forzar clase: "NOMBRE,HH:MM,dia_semana" (ej: CICLO,18:00,3)'
         required: false
         default: ''
 
