@@ -88,7 +88,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-${{ github.run_id }}
-          path: screenshots/
+          path: |
+            screenshots/
+            login_failed_hierarchy.xml
           retention-days: 7
 
       - name: Upload log

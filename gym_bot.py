@@ -316,20 +316,32 @@ def login(device):
     time.sleep(8)
     screenshot(device, "after_login")
 
-    # Descartar posibles diálogos post-login (permisos, tutorial)
-    for _ in range(6):
+    # Descartar posibles diálogos post-login (permisos, tutorial, onboarding)
+    # En un emulador fresco la app puede tardar 3-4 min en cargar el club
+    HOME_INDICATORS = ["COLECTIVAS", "Colectivas", "Reserva una clase", "Tus citas",
+                       "Entrenador", "Explorar", "MOVERGY", "Tus planes"]
+    for i in range(20):
         dismiss_anr(device)
         texts = get_texts(device)
-        if any(t in texts for t in ["COLECTIVAS", "Colectivas", "Reserva una clase", "Tus citas",
-                                     "Entrenador", "Explorar"]):
+        log.info(f"  Post-login iter {i+1}/20 texts: {texts[:15]}")
+        if any(t in texts for t in HOME_INDICATORS):
             log.info("Club home reached")
             return True
         click_if_present(device, "CONTINUE", "SKIP", "OK", "Allow",
-                         "While using the app", "START", timeout=2)
-        time.sleep(2)
+                         "While using the app", "Only this time",
+                         "START", "Empezar", "Siguiente", "ACEPTAR",
+                         timeout=2)
+        time.sleep(3)
 
     log.warning("Login may have failed — could not find club home")
     screenshot(device, "login_failed")
+    try:
+        xml = device.dump_hierarchy()
+        with open("login_failed_hierarchy.xml", "w", encoding="utf-8") as f:
+            f.write(xml)
+        log.info("Saved UI hierarchy to login_failed_hierarchy.xml")
+    except Exception as e:
+        log.warning(f"Could not dump hierarchy: {e}")
     return False
 
 
@@ -342,20 +354,29 @@ def navigate_to_colectivas(device):
     log.info("--- NAVIGATE TO COLECTIVAS ---")
     time.sleep(2)
 
-    # El tab puede llamarse "COLECTIVAS" o "Colectivas"
+    # Intentar el tab COLECTIVAS directamente (bottom nav)
     if click_text(device, "COLECTIVAS", timeout=5) or click_text(device, "Colectivas", timeout=3):
         time.sleep(3)
         screenshot(device, "colectivas_screen")
         return True
 
-    # Si no está visible, intentar desde "Reserva una clase"
+    # Si no está visible, intentar desde "Reserva una clase" (botón en home)
     if click_text(device, "Reserva una clase", timeout=5):
         time.sleep(3)
         screenshot(device, "reserva_screen")
+        # Desde la pantalla de reserva, pulsar COLECTIVAS si aparece
+        if click_text(device, "COLECTIVAS", timeout=5) or click_text(device, "Colectivas", timeout=3):
+            time.sleep(3)
+            screenshot(device, "colectivas_screen")
         return True
 
     log.warning("Could not navigate to COLECTIVAS")
     screenshot(device, "nav_failed")
+    try:
+        texts = get_texts(device)
+        log.info(f"  Nav failed — visible texts: {texts[:20]}")
+    except Exception:
+        pass
     return False
 
 
