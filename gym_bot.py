@@ -328,11 +328,15 @@ def adb_type_text(text):
     Razón: en Android 14 con LatinIME, `adb shell input text <largo>` puede
     colgarse indefinidamente porque el texto pasa por el IME que compone
     de forma asíncrona. Usar `input keyevent` evita la cola del IME.
+
+    En el emulador de CI hay que dejar tiempo entre teclas — los 0.05s
+    iniciales perdían caracteres porque Flutter está saturado durante el
+    primer minuto post-login y a veces el evento siguiente llega antes de
+    que el campo procese el anterior. 0.15s en CI es seguro.
     """
     for char in text:
         adb_send_char(char)
-        # Pausa mínima para que la app procese cada tecla (Flutter es lento).
-        time.sleep(0.05)
+        time.sleep(0.15)
 
 
 def disable_soft_keyboard():
