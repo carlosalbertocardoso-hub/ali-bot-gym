@@ -9,14 +9,12 @@ Programado vía Windows Task Scheduler:
 Ejecutar: python gym_bot.py
 """
 import uiautomator2 as u2
-import base64
 import time
 import logging
 import os
 import re
 import subprocess
 from datetime import datetime
-from uiautomator2.utils import with_package_resource
 
 # ============================================================
 # CONFIGURACIÓN
@@ -24,7 +22,7 @@ from uiautomator2.utils import with_package_resource
 EMAIL = "aliciaramirezcaballero@gmail.com"
 PASSWORD = "gimnasio"
 APP_PACKAGE = "com.technogym.tgapp"
-ADB_KEYBOARD_IME = "com.github.uiautomator/.AdbKeyboard"
+LATIN_IME = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"
 DEVICE_SERIAL = os.environ.get("DEVICE_SERIAL", "emulator-5554")
 AVD_NAME = "GymBotPlayAVD"
 BASE_DIR = os.path.dirname(__file__)
@@ -163,49 +161,14 @@ def enable_soft_keyboard():
         pass
 
 
-def ensure_adb_keyboard():
-    """Instala y activa AdbKeyboard como IME Android para escribir en campos Flutter."""
-    try:
-        ime_list = run_adb("shell", "ime", "list", "-s", timeout=10).stdout
-        if ADB_KEYBOARD_IME not in ime_list:
-            with with_package_resource("assets/app-uiautomator.apk") as apk_path:
-                log.info(f"Installing AdbKeyboard IME from {apk_path}")
-                install = run_adb("install", "-r", "-d", "-g", str(apk_path), timeout=90)
-                install_output = (install.stdout + install.stderr).strip()
-                log.info(f"AdbKeyboard install output: {install_output}")
-                if install.returncode != 0:
-                    run_adb("uninstall", "com.github.uiautomator", timeout=30)
-                    install = run_adb("install", "-r", "-d", "-g", str(apk_path), timeout=90)
-                    install_output = (install.stdout + install.stderr).strip()
-                    log.info(f"AdbKeyboard reinstall output: {install_output}")
-                    if install.returncode != 0:
-                        raise RuntimeError(install_output or "adb install failed")
-
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            ime_list = run_adb("shell", "ime", "list", "-s", timeout=10).stdout
-            if ADB_KEYBOARD_IME in ime_list:
-                break
-            time.sleep(1)
-        else:
-            package_path = run_adb("shell", "pm", "path", "com.github.uiautomator", timeout=10)
-            raise RuntimeError(
-                "AdbKeyboard did not appear in IME list; "
-                f"ime_list={ime_list!r}; package={package_path.stdout.strip()!r}; "
-                f"package_err={package_path.stderr.strip()!r}"
-            )
-
-        for args in (
-            ("shell", "ime", "enable", ADB_KEYBOARD_IME),
-            ("shell", "ime", "set", ADB_KEYBOARD_IME),
-            ("shell", "settings", "put", "secure", "default_input_method", ADB_KEYBOARD_IME),
-        ):
-            result = run_adb(*args, timeout=10)
-            if result.returncode != 0:
-                raise RuntimeError((result.stdout + result.stderr).strip() or f"adb {' '.join(args)} failed")
-        log.info("AdbKeyboard IME enabled")
-    except Exception as exc:
-        raise RuntimeError(f"Could not enable AdbKeyboard IME: {exc}") from exc
+def use_android_keyboard():
+    """Usa el teclado Android estándar visible para escribir credenciales."""
+    enable_soft_keyboard()
+    result = run_adb("shell", "ime", "set", LATIN_IME, timeout=10)
+    if result.returncode != 0:
+        log.warning(f"Could not switch to LatinIME: {(result.stdout + result.stderr).strip()}")
+    else:
+        log.info("Android LatinIME keyboard enabled")
 
 
 # ============================================================
@@ -254,20 +217,33 @@ def focus_field(field, fallback_x, fallback_y):
         tap_adb(fallback_x, fallback_y)
 
 
-def adb_keyboard_broadcast(action, *args, timeout=20):
-    result = run_adb("shell", "am", "broadcast", "-a", action, *args, timeout=timeout)
-    if result.returncode != 0 or "result=-1" not in result.stdout:
-        detail = (result.stdout + result.stderr).strip()
-        raise RuntimeError(f"AdbKeyboard broadcast failed: {action}: {detail}")
+KEYBOARD_POINTS = {
+    "q": (54, 1290), "w": (162, 1290), "e": (270, 1290), "r": (378, 1290), "t": (486, 1290),
+    "y": (594, 1290), "u": (702, 1290), "i": (810, 1290), "o": (918, 1290), "p": (1026, 1290),
+    "a": (108, 1435), "s": (216, 1435), "d": (324, 1435), "f": (432, 1435), "g": (540, 1435),
+    "h": (648, 1435), "j": (756, 1435), "k": (864, 1435), "l": (972, 1435),
+    "z": (162, 1580), "x": (270, 1580), "c": (378, 1580), "v": (486, 1580), "b": (594, 1580),
+    "n": (702, 1580), "m": (810, 1580),
+    "@": (215, 1725), ".": (865, 1725),
+}
 
 
-def adb_keyboard_text(text):
-    encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    adb_keyboard_broadcast("ADB_KEYBOARD_INPUT_TEXT", "--es", "text", encoded, timeout=30)
+def tap_android_keyboard_text(text):
+    """Pulsa teclas del teclado Android visible en una pantalla 1080x1920."""
+    for char in text.lower():
+        point = KEYBOARD_POINTS.get(char)
+        if char.isdigit():
+            raise RuntimeError(f"Digit typing is not mapped for Android keyboard: {char}")
+        if not point:
+            raise RuntimeError(f"Unsupported Android keyboard character: {char!r}")
+        tap_adb(*point)
+        time.sleep(0.08)
 
 
 def clear_focused_text():
-    adb_keyboard_broadcast("ADB_KEYBOARD_CLEAR_TEXT")
+    run_adb("shell", "input", "keyevent", "KEYCODE_MOVE_END", timeout=10)
+    for _ in range(80):
+        run_adb("shell", "input", "keyevent", "KEYCODE_DEL", timeout=10)
     time.sleep(0.5)
 
 
@@ -282,11 +258,11 @@ def read_field_text(device, resource_id):
 
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo con AdbKeyboard, sin clipboard, set_text ni adb input text."""
+    """Rellena un campo tocando el teclado Android visible."""
     focus_field(field, fallback_x, fallback_y)
     clear_focused_text()
     focus_field(field, fallback_x, fallback_y)
-    adb_keyboard_text(text)
+    tap_android_keyboard_text(text)
     time.sleep(1)
 
     if not verify or not resource_id:
@@ -294,7 +270,7 @@ def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=54
 
     actual = read_field_text(device, resource_id)
     if actual.lower() == text.lower():
-        log.info(f"Text entered with AdbKeyboard: {resource_id}")
+        log.info(f"Text entered with Android keyboard taps: {resource_id}")
         return True
 
     raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
@@ -978,8 +954,7 @@ def main():
     try:
         ensure_emulator()
         grant_app_permissions()
-        enable_soft_keyboard()
-        ensure_adb_keyboard()
+        use_android_keyboard()
 
         device = u2.connect(DEVICE_SERIAL)
         # uiautomator2 server puede tardar unos segundos en estar listo
