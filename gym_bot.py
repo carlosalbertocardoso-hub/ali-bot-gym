@@ -191,9 +191,25 @@ def tap_adb(x, y):
 def adb_input_text(text):
     """Escribe texto con ADB, evitando clipboard/IME de uiautomator2 en Android 14."""
     escaped = text.replace("%", "%25").replace(" ", "%s")
-    result = run_adb("shell", "input", "text", escaped, timeout=10)
+    result = run_adb("shell", "input", "text", escaped, timeout=30)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "adb input text failed")
+
+
+def adb_input_text_chars(text):
+    for char in text:
+        adb_input_text(char)
+        time.sleep(0.08)
+
+
+def focus_field(field, fallback_x, fallback_y):
+    try:
+        b = field.info.get("bounds", {})
+        cx = (b.get("left", 0) + b.get("right", fallback_x * 2)) // 2
+        cy = (b.get("top", 0) + b.get("bottom", fallback_y * 2)) // 2
+        tap_adb(cx, cy)
+    except Exception:
+        tap_adb(fallback_x, fallback_y)
 
 
 def adb_keyevent_text(text):
@@ -242,14 +258,16 @@ def read_field_text(device, resource_id):
     return ""
 
 
-def enter_text(device, field, text, resource_id=None, verify=True):
+def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
     """Rellena un campo sin usar send_keys ni set_text, que fallan en CI con esta app."""
+    focus_field(field, fallback_x, fallback_y)
     clear_focused_text(device)
 
     for method_name, method in (
         ("adb keyevents", adb_keyevent_text),
-        ("adb input text", adb_input_text),
+        ("adb input text chars", adb_input_text_chars),
     ):
+        focus_field(field, fallback_x, fallback_y)
         method(text)
         time.sleep(1)
 
@@ -262,6 +280,7 @@ def enter_text(device, field, text, resource_id=None, verify=True):
             return True
 
         log.warning(f"{method_name} entered unexpected value for {resource_id}: {actual!r}")
+        focus_field(field, fallback_x, fallback_y)
         clear_focused_text(device)
 
     actual = read_field_text(device, resource_id) if resource_id else ""
@@ -393,7 +412,14 @@ def login(device):
             except Exception:
                 tap_adb(540, 315)
             time.sleep(1)
-            enter_text(device, email_el, EMAIL, resource_id="loginPage.username.textfield", verify=True)
+            enter_text(
+                device,
+                email_el,
+                EMAIL,
+                resource_id="loginPage.username.textfield",
+                verify=True,
+                fallback_y=315,
+            )
             time.sleep(1)
             log.info(f"Email entered: {EMAIL}")
             filled_email = True
@@ -443,7 +469,14 @@ def login(device):
             except Exception:
                 tap_adb(540, 525)
             time.sleep(1)
-            enter_text(device, pw_el, PASSWORD, resource_id="loginPage.password.textfield", verify=False)
+            enter_text(
+                device,
+                pw_el,
+                PASSWORD,
+                resource_id="loginPage.password.textfield",
+                verify=False,
+                fallback_y=525,
+            )
             time.sleep(1)
             log.info("Password entered")
             filled_pw = True
