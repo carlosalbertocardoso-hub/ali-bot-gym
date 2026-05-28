@@ -91,6 +91,7 @@ jobs:
           path: |
             screenshots/
             login_failed_hierarchy.xml
+            postlogin_iter*.xml
           retention-days: 7
 
       - name: Upload log

@@ -320,26 +320,50 @@ def login(device):
     # En un emulador fresco la app puede tardar 3-4 min en cargar el club
     HOME_INDICATORS = ["COLECTIVAS", "Colectivas", "Reserva una clase", "Tus citas",
                        "Entrenador", "Explorar", "MOVERGY", "Tus planes"]
-    for i in range(20):
+    DIALOG_TEXTS = ["CONTINUE", "SKIP", "OK", "Allow",
+                    "While using the app", "Only this time",
+                    "START", "Empezar", "Siguiente", "ACEPTAR"]
+    for i in range(40):
         dismiss_anr(device)
-        texts = get_texts(device)
-        log.info(f"  Post-login iter {i+1}/20 texts: {texts[:15]}")
+        xml = device.dump_hierarchy()
+        texts = [t for t in re.findall(r'text="([^"]+)"', xml) if t.strip()]
+        log.info(f"  Post-login iter {i+1}/40 texts: {texts[:15]}")
+
+        # Guardar XML cada 5 iteraciones para diagnóstico
+        if i % 5 == 0:
+            try:
+                xml_path = os.path.join(BASE_DIR, f"postlogin_iter{i+1:02d}.xml")
+                with open(xml_path, "w", encoding="utf-8") as f:
+                    f.write(xml)
+            except Exception:
+                pass
+
         if any(t in texts for t in HOME_INDICATORS):
             log.info("Club home reached")
             return True
-        click_if_present(device, "CONTINUE", "SKIP", "OK", "Allow",
-                         "While using the app", "Only this time",
-                         "START", "Empezar", "Siguiente", "ACEPTAR",
-                         timeout=2)
-        time.sleep(3)
+
+        # Descarte rápido de diálogos — sin timeout, solo .exists
+        for dlg in DIALOG_TEXTS:
+            el = device(textContains=dlg)
+            if el.exists:
+                try:
+                    el.click()
+                    log.info(f"  Dismissed: {dlg}")
+                    time.sleep(2)
+                    break
+                except Exception:
+                    pass
+
+        time.sleep(5)
 
     log.warning("Login may have failed — could not find club home")
     screenshot(device, "login_failed")
     try:
         xml = device.dump_hierarchy()
-        with open("login_failed_hierarchy.xml", "w", encoding="utf-8") as f:
+        xml_path = os.path.join(BASE_DIR, "login_failed_hierarchy.xml")
+        with open(xml_path, "w", encoding="utf-8") as f:
             f.write(xml)
-        log.info("Saved UI hierarchy to login_failed_hierarchy.xml")
+        log.info(f"Saved UI hierarchy to {xml_path}")
     except Exception as e:
         log.warning(f"Could not dump hierarchy: {e}")
     return False
