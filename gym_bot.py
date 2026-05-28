@@ -243,27 +243,46 @@ def focus_field(field, fallback_x, fallback_y):
         tap_adb(fallback_x, fallback_y)
 
 
-KEYBOARD_POINTS = {
-    "q": (54, 1290), "w": (162, 1290), "e": (270, 1290), "r": (378, 1290), "t": (486, 1290),
-    "y": (594, 1290), "u": (702, 1290), "i": (810, 1290), "o": (918, 1290), "p": (1026, 1290),
-    "a": (108, 1435), "s": (216, 1435), "d": (324, 1435), "f": (432, 1435), "g": (540, 1435),
-    "h": (648, 1435), "j": (756, 1435), "k": (864, 1435), "l": (972, 1435),
-    "z": (162, 1580), "x": (270, 1580), "c": (378, 1580), "v": (486, 1580), "b": (594, 1580),
-    "n": (702, 1580), "m": (810, 1580),
-    "@": (215, 1725), ".": (865, 1725),
+ADB_TEXT_KEYEVENTS = {
+    "@": "KEYCODE_AT",
+    ".": "KEYCODE_PERIOD",
 }
 
 
-def tap_android_keyboard_text(text):
-    """Pulsa teclas del teclado Android visible en una pantalla 1080x1920."""
-    for char in text.lower():
-        point = KEYBOARD_POINTS.get(char)
-        if char.isdigit():
-            raise RuntimeError(f"Digit typing is not mapped for Android keyboard: {char}")
-        if not point:
-            raise RuntimeError(f"Unsupported Android keyboard character: {char!r}")
-        tap_adb(*point)
-        time.sleep(0.08)
+def adb_input_text_chunk(chunk):
+    safe = chunk.replace("%", "%25").replace(" ", "%s")
+    result = run_adb("shell", "input", "text", safe, timeout=10)
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "adb input text failed").strip()
+        raise RuntimeError(details)
+
+
+def adb_type_text(text):
+    """Escribe en el campo enfocado usando Android input, sin clipboard ni IME externa."""
+    chunk = []
+
+    def flush():
+        if chunk:
+            adb_input_text_chunk("".join(chunk))
+            chunk.clear()
+            time.sleep(0.2)
+
+    for char in text:
+        if char.isalnum():
+            chunk.append(char)
+            continue
+
+        flush()
+        keycode = ADB_TEXT_KEYEVENTS.get(char)
+        if not keycode:
+            raise RuntimeError(f"Unsupported adb input character: {char!r}")
+        result = run_adb("shell", "input", "keyevent", keycode, timeout=10)
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or f"adb keyevent {keycode} failed").strip()
+            raise RuntimeError(details)
+        time.sleep(0.2)
+
+    flush()
 
 
 def clear_focused_text():
@@ -284,26 +303,24 @@ def read_field_text(device, resource_id):
 
 
 def enter_text(device, field, text, resource_id=None, verify=True, fallback_x=540, fallback_y=315):
-    """Rellena un campo tocando el teclado Android visible."""
+    """Rellena un campo por ADB input, evitando clipboard, send_keys e IME externas."""
     focus_field(field, fallback_x, fallback_y)
     log_keyboard_state("before_clear")
-    screenshot(device, f"keyboard_before_clear_{resource_id or 'field'}")
     clear_focused_text()
     focus_field(field, fallback_x, fallback_y)
-    time.sleep(1)
+    time.sleep(0.5)
     log_keyboard_state("before_type")
-    screenshot(device, f"keyboard_before_type_{resource_id or 'field'}")
-    tap_android_keyboard_text(text)
+    adb_type_text(text)
     time.sleep(1)
     log_keyboard_state("after_type")
-    screenshot(device, f"keyboard_after_type_{resource_id or 'field'}")
+    screenshot(device, f"after_adb_type_{resource_id or 'field'}")
 
     if not verify or not resource_id:
         return True
 
     actual = read_field_text(device, resource_id)
     if actual.lower() == text.lower():
-        log.info(f"Text entered with Android keyboard taps: {resource_id}")
+        log.info(f"Text entered with adb input: {resource_id}")
         return True
 
     raise RuntimeError(f"Could not enter text into {resource_id or 'field'}; current value: {actual!r}")
