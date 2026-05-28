@@ -329,12 +329,23 @@ def login(device):
         texts = [t for t in re.findall(r'text="([^"]+)"', xml) if t.strip()]
         log.info(f"  Post-login iter {i+1}/40 texts: {texts[:15]}")
 
-        # Guardar XML cada 5 iteraciones para diagnóstico
+        # Guardar XML y screenshot ADB cada 5 iteraciones para diagnóstico
         if i % 5 == 0:
             try:
                 xml_path = os.path.join(BASE_DIR, f"postlogin_iter{i+1:02d}.xml")
                 with open(xml_path, "w", encoding="utf-8") as f:
                     f.write(xml)
+            except Exception:
+                pass
+            try:
+                img_path = os.path.join(SCREENSHOT_DIR, f"postlogin_iter{i+1:02d}.png")
+                result = subprocess.run(
+                    [adb_path(), "-s", DEVICE_SERIAL, "exec-out", "screencap", "-p"],
+                    capture_output=True, timeout=15
+                )
+                if result.returncode == 0 and result.stdout:
+                    with open(img_path, "wb") as f:
+                        f.write(result.stdout)
             except Exception:
                 pass
 
