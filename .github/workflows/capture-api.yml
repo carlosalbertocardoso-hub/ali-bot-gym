@@ -1,7 +1,7 @@
 name: Capturar API Technogym
 
-# One-shot: arranca emulador con mitmproxy interceptando HTTPS, abre Technogym,
-# hace login y deja capturar el tráfico. Sube como artefacto el dump completo.
+# One-shot: parchea Technogym con frida-gadget, arranca emulador con mitmproxy
+# y captura el tráfico HTTPS desbloqueando el SSL pinning.
 # Lanzar manualmente desde Actions → "Capturar API Technogym" → Run workflow.
 
 on:
@@ -10,7 +10,7 @@ on:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -40,9 +40,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y xvfb openssl libxcb-cursor0 libxcb-icccm4 \
-            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-xinerama0 libxcb-xfixes0
+          sudo apt-get install -y xvfb openssl apksigner zipalign
           sudo systemctl stop snapd.service snapd.socket unattended-upgrades.service 2>/dev/null || true
 
       - name: Start virtual display
@@ -51,8 +49,7 @@ jobs:
           echo "DISPLAY=:0" >> $GITHUB_ENV
 
       - name: Enable KVM
-        run: |
-          sudo chmod 666 /dev/kvm
+        run: sudo chmod 666 /dev/kvm
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -60,20 +57,29 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python deps
-        run: pip install uiautomator2 mitmproxy
+        run: pip install uiautomator2 mitmproxy objection frida-tools
 
       - name: Pre-generate mitmproxy CA cert
         run: |
-          # Arrancar mitmdump un instante para que genere ~/.mitmproxy/*.pem
           mkdir -p ~/.mitmproxy
           timeout 5 mitmdump --listen-port 8080 --set confdir=~/.mitmproxy >/dev/null 2>&1 || true
           ls -la ~/.mitmproxy/
-          # Computar hash que Android espera para system-cert
-          HASH=$(openssl x509 -inform PEM -subject_hash_old -in ~/.mitmproxy/mitmproxy-ca-cert.pem -noout)
-          cp ~/.mitmproxy/mitmproxy-ca-cert.pem ~/.mitmproxy/${HASH}.0
-          echo "MITM_CERT_HASH=$HASH" >> $GITHUB_ENV
-          echo "MITM_CERT_PATH=$HOME/.mitmproxy/${HASH}.0" >> $GITHUB_ENV
-          echo "Cert hash: $HASH"
+          # Cert para instalar como user-cert en Android (no necesita root)
+          openssl x509 -in ~/.mitmproxy/mitmproxy-ca-cert.pem -outform DER -out ~/.mitmproxy/mitm-ca.crt
+
+      - name: Patch Technogym APK with frida-gadget
+        run: |
+          # objection patchapk inyecta libfrida-gadget.so en el APK base.
+          # Esto permite ejecutar Frida sin root en el emulador.
+          objection patchapk \
+            --source technogym-3.43.2-xapk/com.technogym.tgapp.apk \
+            --architecture x86_64 \
+            --use-aapt2 || echo "objection patch attempt 1 failed"
+          ls -la technogym-3.43.2-xapk/*.objection.apk || ls -la *.objection.apk || true
+          # objection deja el APK como NOMBRE.objection.apk
+          mv technogym-3.43.2-xapk/com.technogym.tgapp.objection.apk patched-base.apk || \
+            mv com.technogym.tgapp.objection.apk patched-base.apk
+          ls -la patched-base.apk
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -81,15 +87,14 @@ jobs:
       - name: Start emulator + capture
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          # google_apis (no playstore) permite -writable-system para meter el CA
-          api-level: 33
-          target: google_apis
+          api-level: 34
+          target: google_apis_playstore
           arch: x86_64
           profile: pixel_2
           ram-size: 4096M
           heap-size: 576M
           avd-name: CaptureAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps -writable-system -http-proxy 10.0.2.2:8080
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps -http-proxy 10.0.2.2:8080
           disable-animations: true
           script: bash capture_api.sh
 
