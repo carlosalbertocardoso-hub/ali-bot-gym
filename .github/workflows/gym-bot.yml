@@ -58,13 +58,6 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android emulator image
-        run: |
-          sdkmanager --install \
-            "system-images;android-34;google_apis_playstore;x86_64" \
-            "emulator" \
-            "platform-tools"
-
       - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -75,7 +68,7 @@ jobs:
           ram-size: 3072M
           heap-size: 512M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -no-accel -memory 3072 -cores 2 -no-camera-back -no-camera-front
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 3072 -cores 2 -no-camera-back -no-camera-front
           disable-animations: true
           script: bash run_bot.sh
 
