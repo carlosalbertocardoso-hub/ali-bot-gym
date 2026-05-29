@@ -220,6 +220,30 @@ def connect_uiautomator():
     raise RuntimeError(f"uiautomator2 server never became ready: {last_error}") from last_error
 
 
+def reconnect_device(retries=5, wait=10):
+    """Reconecta uiautomator2 tras un 'device offline'.
+
+    El emulador puede congelarse brevemente cuando Flutter hace operaciones
+    pesadas (navigate, dump_hierarchy). El proceso del emulador sigue vivo
+    pero ADB lo reporta offline durante unos segundos. Reintentamos hasta
+    que ADB lo ve online de nuevo.
+    """
+    log.info("Device offline — waiting for ADB to reconnect...")
+    for attempt in range(1, retries + 1):
+        time.sleep(wait)
+        try:
+            result = subprocess.run(
+                [adb_path(), "devices"], capture_output=True, text=True, timeout=10
+            )
+            if f"{DEVICE_SERIAL}\tdevice" in result.stdout:
+                log.info(f"ADB reconnected (attempt {attempt})")
+                return connect_uiautomator()
+            log.info(f"  Still offline (attempt {attempt}/{retries})...")
+        except Exception as exc:
+            log.info(f"  ADB check failed: {exc}")
+    raise RuntimeError("Device did not come back online after reconnect attempts")
+
+
 # ============================================================
 # UI HELPERS
 # ============================================================
@@ -1220,9 +1244,27 @@ def main():
             log.error("Login failed — aborting")
             return
 
-        if not navigate_to_colectivas(device):
-            log.error("Navigation failed — aborting")
-            return
+        # navigate_to_colectivas y book_class pueden perder la conexión ADB
+        # brevemente si el emulador congela la UI (Flutter dump_hierarchy).
+        # Intentamos reconectar hasta 3 veces antes de abortar.
+        for nav_attempt in range(1, 4):
+            try:
+                if not navigate_to_colectivas(device):
+                    log.error("Navigation failed — aborting")
+                    return
+                break
+            except Exception as exc:
+                log.warning(f"navigate_to_colectivas error (attempt {nav_attempt}/3): {exc}")
+                if nav_attempt == 3:
+                    log.error("Could not navigate after 3 attempts — aborting")
+                    return
+                try:
+                    device = reconnect_device()
+                    bring_app_foreground()
+                    time.sleep(5)
+                except Exception as rec_exc:
+                    log.error(f"Reconnect failed: {rec_exc}")
+                    return
 
         # En CI sin forzado: esperar con la app ya abierta en COLECTIVAS
         # hasta las 22:00 exactas (20:00 UTC) antes de intentar la reserva
