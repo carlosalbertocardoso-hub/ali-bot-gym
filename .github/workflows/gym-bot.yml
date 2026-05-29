@@ -72,23 +72,18 @@ jobs:
             --package "system-images;android-34;google_apis_playstore;x86_64" \
             --device "pixel_2" \
             --force
-
-      - name: Tune AVD config for CI memory constraints
-        run: |
-          # ubuntu-latest tiene ~7 GB RAM. Con 4096M el emulador agota el host
-          # (Python + adb + Xvfb necesitan ~1.5 GB) y el proceso muere por OOM.
-          # Usamos 3072M para el guest y desactivamos features que consumen RAM
-          # sin aportar nada al bot: GPU host acelerada, cámara, sensores.
-          CONFIG="$HOME/.android/avd/GymBotPlayAVD.avd/config.ini"
-          sed -i 's/^hw\.ramSize=.*/hw.ramSize=3072/' "$CONFIG" 2>/dev/null || true
-          sed -i 's/^vm\.heapSize=.*/vm.heapSize=512/' "$CONFIG" 2>/dev/null || true
-          # Desactivar cámara virtual (ahorra ~100 MB en arranque)
+          # Tuning de memoria — debe hacerse DESPUÉS de create avd
+          # ANDROID_AVD_HOME lo fija android-actions/setup-android; usarlo es más fiable que $HOME
+          CONFIG="${ANDROID_AVD_HOME:-$HOME/.android/avd}/GymBotPlayAVD.avd/config.ini"
+          echo "Tuning config: $CONFIG"
+          # 3072M deja ~2.5 GB libres para el host (Python + adb + Xvfb)
+          sed -i 's/^hw\.ramSize=.*/hw.ramSize=3072/' "$CONFIG"
+          sed -i 's/^vm\.heapSize=.*/vm.heapSize=512/' "$CONFIG"
           echo "hw.camera.back=none"  >> "$CONFIG"
           echo "hw.camera.front=none" >> "$CONFIG"
-          # Forzar 2 cores (el runner tiene 2 vCPUs reales; más cores = más overhead)
-          sed -i 's/^hw\.cpu\.ncore=.*/hw.cpu.ncore=2/' "$CONFIG" 2>/dev/null || true
-          echo "AVD config after tuning:"
-          grep -E 'ramSize|heapSize|camera|ncore' "$CONFIG" || true
+          sed -i 's/^hw\.cpu\.ncore=.*/hw.cpu.ncore=2/' "$CONFIG"
+          echo "--- AVD config (memory/camera/cores) ---"
+          grep -E 'ramSize|heapSize|camera|ncore' "$CONFIG"
 
       - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
