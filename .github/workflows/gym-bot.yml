@@ -80,7 +80,7 @@ jobs:
           ram-size: 3072M
           heap-size: 512M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 3072 -cores 2 -no-camera-back -no-camera-front
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 3072 -cores 2 -camera-back none -camera-front none
           disable-animations: true
           script: bash run_bot.sh
 
