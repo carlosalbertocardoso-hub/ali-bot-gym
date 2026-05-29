@@ -75,10 +75,10 @@ jobs:
           target: google_apis_playstore
           arch: x86_64
           profile: pixel_2
-          ram-size: 2048M
-          heap-size: 512M
+          ram-size: 4096M
+          heap-size: 1024M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window
           disable-animations: true
           script: bash run_bot.sh
 
