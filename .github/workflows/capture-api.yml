@@ -1,0 +1,106 @@
+name: Capturar API Technogym
+
+# One-shot: arranca emulador con mitmproxy interceptando HTTPS, abre Technogym,
+# hace login y deja capturar el tráfico. Sube como artefacto el dump completo.
+# Lanzar manualmente desde Actions → "Capturar API Technogym" → Run workflow.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+                      /opt/ghc /usr/share/swift /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/powershell /usr/local/lib/node_modules \
+                      /opt/microsoft
+          docker system prune -af 2>/dev/null || true
+          df -h
+
+      - name: Add swap (12GB)
+        run: |
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /mnt/swapfile /swapfile
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          sudo sysctl vm.swappiness=80
+          free -h
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y xvfb openssl libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-xinerama0 libxcb-xfixes0
+          sudo systemctl stop snapd.service snapd.socket unattended-upgrades.service 2>/dev/null || true
+
+      - name: Start virtual display
+        run: |
+          Xvfb :0 -screen 0 1280x800x24 &
+          echo "DISPLAY=:0" >> $GITHUB_ENV
+
+      - name: Enable KVM
+        run: |
+          sudo chmod 666 /dev/kvm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install uiautomator2 mitmproxy
+
+      - name: Pre-generate mitmproxy CA cert
+        run: |
+          # Arrancar mitmdump un instante para que genere ~/.mitmproxy/*.pem
+          mkdir -p ~/.mitmproxy
+          timeout 5 mitmdump --listen-port 8080 --set confdir=~/.mitmproxy >/dev/null 2>&1 || true
+          ls -la ~/.mitmproxy/
+          # Computar hash que Android espera para system-cert
+          HASH=$(openssl x509 -inform PEM -subject_hash_old -in ~/.mitmproxy/mitmproxy-ca-cert.pem -noout)
+          cp ~/.mitmproxy/mitmproxy-ca-cert.pem ~/.mitmproxy/${HASH}.0
+          echo "MITM_CERT_HASH=$HASH" >> $GITHUB_ENV
+          echo "MITM_CERT_PATH=$HOME/.mitmproxy/${HASH}.0" >> $GITHUB_ENV
+          echo "Cert hash: $HASH"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Start emulator + capture
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # google_apis (no playstore) permite -writable-system para meter el CA
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 4096M
+          heap-size: 576M
+          avd-name: CaptureAVD
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps -writable-system -http-proxy 10.0.2.2:8080
+          disable-animations: true
+          script: bash capture_api.sh
+
+      - name: Upload capture artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-capture-${{ github.run_id }}
+          path: |
+            mitm_flows.dump
+            mitm_flows.txt
+            capture.log
+            screenshots/
+          retention-days: 30
