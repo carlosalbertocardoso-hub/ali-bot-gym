@@ -589,46 +589,67 @@ def login(device):
 
 def navigate_to_colectivas(device):
     """
-    Intenta llegar a la pantalla de clases colectivas:
-    1. Pulsa 'Reserva una clase' (botón en home del club)
-    2. Fallback: pulsa el tab COLECTIVAS de la bottom nav
+    Navega a colectivas usando tap_adb directo (sin JSON-RPC uiautomator2)
+    para evitar OOM en el emulador CI bajo memoria limitada.
+
+    Pixel 2 (1080x1920) layout conocido desde capturas y logs CI:
+    - "Book a class" aprox. y=900 (mitad de pantalla, debajo de "Your appointments")
+    - COLECTIVAS tab 2/5 en bottom nav: x=324, y=1870
+
+    Estrategia: intentar primero COLECTIVAS tab (más fiable, siempre visible),
+    luego fallback a "Book a class" coordenadas si falla la verificación.
     """
-    log.info("--- NAVIGATE TO COLECTIVAS ---")
+    log.info("--- NAVIGATE TO COLECTIVAS (ADB taps, no JSON-RPC) ---")
     time.sleep(2)
+
+    # Coordenadas Pixel 2 1080x1920
+    COLECTIVAS_TAB_X, COLECTIVAS_TAB_Y = 324, 1870   # tab 2 of 5 en bottom nav
+    BOOK_CLASS_X,     BOOK_CLASS_Y     = 540, 900     # botón "Reserva una clase"
 
     for attempt in range(3):
         dismiss_anr(device)
 
-        # Opción 1: botón "Reserva una clase" en la home
-        for label in ("Reserva una clase", "Book a class"):
-            el = device(textContains=label)
-            if el.exists:
-                try:
-                    tap_by_bounds(el)
-                    log.info(f"  Tapped '{label}' — now on colectivas screen")
-                    time.sleep(3)
-                    screenshot(device, "colectivas_screen")
-                    return True
-                except Exception as exc:
-                    log.warning(f"  '{label}' tap failed: {exc}")
+        # Intento 1: tap directo en tab COLECTIVAS (bottom nav, posición fija)
+        log.info(f"  Attempt {attempt+1}: tapping COLECTIVAS tab ({COLECTIVAS_TAB_X},{COLECTIVAS_TAB_Y})")
+        tap_adb(COLECTIVAS_TAB_X, COLECTIVAS_TAB_Y)
+        time.sleep(3)
+        screenshot(device, f"after_colectivas_tab_{attempt+1}")
 
-        # Opción 2: tab COLECTIVAS en la bottom nav
-        for label in ("COLECTIVAS", "Colectivas"):
-            el = device(textContains=label)
-            if el.exists:
-                try:
-                    tap_by_bounds(el)
-                    log.info(f"  Tapped tab '{label}' — now on colectivas screen")
-                    time.sleep(3)
-                    screenshot(device, "colectivas_screen")
-                    return True
-                except Exception as exc:
-                    log.warning(f"  Tab '{label}' tap failed: {exc}")
+        # Verificar via XML si llegamos a colectivas (un dump ligero)
+        try:
+            xml = safe_dump(device)
+            if xml_contains_any(xml, ["RESERVAR", "CANCELAR", "ÚNETE", "MIÉ", "MIE", "JUE", "VIE", "LUN", "MAR"]):
+                log.info("  COLECTIVAS screen confirmed via XML")
+                screenshot(device, "colectivas_screen")
+                return True
+            # Si hay selector de días o lista de clases, estamos en colectivas
+            if xml_contains_any(xml, ["COLECTIVAS", "Colectivas"]) and xml_contains_any(xml, [":"]):
+                log.info("  COLECTIVAS screen likely reached")
+                screenshot(device, "colectivas_screen")
+                return True
+            log.info(f"  XML check: not on colectivas yet (attempt {attempt+1})")
+        except Exception as exc:
+            log.warning(f"  XML check failed: {exc} — trying Book a class tap")
 
-        log.info(f"  COLECTIVAS not found (attempt {attempt+1}/3), retrying...")
+        # Intento 2: tap en "Book a class" / "Reserva una clase"
+        log.info(f"  Attempt {attempt+1}: tapping Book a class ({BOOK_CLASS_X},{BOOK_CLASS_Y})")
+        tap_adb(BOOK_CLASS_X, BOOK_CLASS_Y)
+        time.sleep(3)
+        screenshot(device, f"after_book_class_{attempt+1}")
+
+        try:
+            xml = safe_dump(device)
+            if xml_contains_any(xml, ["RESERVAR", "CANCELAR", "ÚNETE", "MIÉ", "MIE", "JUE", "VIE", "LUN", "MAR"]):
+                log.info("  COLECTIVAS screen confirmed after Book a class tap")
+                screenshot(device, "colectivas_screen")
+                return True
+        except Exception as exc:
+            log.warning(f"  XML check after Book a class failed: {exc}")
+
+        log.info(f"  Retry {attempt+1}/3 — waiting 3s")
         time.sleep(3)
 
-    log.warning("Could not navigate to colectivas screen")
+    log.warning("Could not navigate to colectivas screen after 3 attempts")
     screenshot(device, "nav_failed")
     save_hierarchy(device, "nav_failed_hierarchy")
     return False
