@@ -591,46 +591,35 @@ def navigate_to_colectivas(device):
     log.info("--- NAVIGATE TO COLECTIVAS ---")
     time.sleep(2)
 
-    # Tab COLECTIVAS en bottom nav — intentar por resource-id, texto y coordenada
     for attempt in range(3):
         dismiss_anr(device)
 
-        # Por texto (más fiable que resource-id en Flutter)
-        el = device(textContains="COLECTIVAS")
-        if not el.exists:
-            el = device(textContains="Colectivas")
-        if el.exists:
-            try:
-                tap_by_bounds(el)
-                log.info("  Tapped COLECTIVAS tab")
-                time.sleep(3)
-                screenshot(device, "colectivas_screen")
-                return True
-            except Exception as exc:
-                log.warning(f"  COLECTIVAS tap failed: {exc}")
-
-        # Desde el botón "Reserva una clase" / "Book a class" en home
+        # Paso 1: pulsar "Reserva una clase" para entrar a la sección de reservas
         for label in ("Reserva una clase", "Book a class"):
-            el2 = device(textContains=label)
-            if el2.exists:
+            el = device(textContains=label)
+            if el.exists:
                 try:
-                    tap_by_bounds(el2)
+                    tap_by_bounds(el)
                     log.info(f"  Tapped '{label}'")
                     time.sleep(3)
-                    # Desde reservas, buscar tab COLECTIVAS
-                    el3 = device(textContains="COLECTIVAS")
-                    if not el3.exists:
-                        el3 = device(textContains="Colectivas")
-                    if el3.exists:
-                        tap_by_bounds(el3)
-                        log.info("  Tapped COLECTIVAS from reservas screen")
-                        time.sleep(3)
-                    screenshot(device, "colectivas_screen")
-                    return True
+                    break
                 except Exception as exc:
                     log.warning(f"  '{label}' tap failed: {exc}")
 
-        log.info(f"  COLECTIVAS not found (attempt {attempt+1}/3), retrying...")
+        # Paso 2: desde la pantalla de reservas, buscar y pulsar tab COLECTIVAS
+        for col_label in ("COLECTIVAS", "Colectivas"):
+            el2 = device(textContains=col_label)
+            if el2.exists:
+                try:
+                    tap_by_bounds(el2)
+                    log.info(f"  Tapped COLECTIVAS tab")
+                    time.sleep(3)
+                    screenshot(device, "colectivas_screen")
+                    return True
+                except Exception as exc:
+                    log.warning(f"  COLECTIVAS tap failed: {exc}")
+
+        log.info(f"  COLECTIVAS not reached (attempt {attempt+1}/3), retrying...")
         time.sleep(3)
 
     log.warning("Could not navigate to COLECTIVAS")
