@@ -65,26 +65,6 @@ jobs:
             "emulator" \
             "platform-tools"
 
-      - name: Create AVD
-        run: |
-          echo no | avdmanager create avd \
-            --name GymBotPlayAVD \
-            --package "system-images;android-34;google_apis_playstore;x86_64" \
-            --device "pixel_2" \
-            --force
-          # Tuning de memoria — debe hacerse DESPUÉS de create avd
-          # ANDROID_AVD_HOME lo fija android-actions/setup-android; usarlo es más fiable que $HOME
-          CONFIG="${ANDROID_AVD_HOME:-$HOME/.android/avd}/GymBotPlayAVD.avd/config.ini"
-          echo "Tuning config: $CONFIG"
-          # 3072M deja ~2.5 GB libres para el host (Python + adb + Xvfb)
-          sed -i 's/^hw\.ramSize=.*/hw.ramSize=3072/' "$CONFIG"
-          sed -i 's/^vm\.heapSize=.*/vm.heapSize=512/' "$CONFIG"
-          echo "hw.camera.back=none"  >> "$CONFIG"
-          echo "hw.camera.front=none" >> "$CONFIG"
-          sed -i 's/^hw\.cpu\.ncore=.*/hw.cpu.ncore=2/' "$CONFIG"
-          echo "--- AVD config (memory/camera/cores) ---"
-          grep -E 'ramSize|heapSize|camera|ncore' "$CONFIG"
-
       - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -95,7 +75,7 @@ jobs:
           ram-size: 3072M
           heap-size: 512M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -no-accel
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -no-accel -memory 3072 -cores 2 -no-camera-back -no-camera-front
           disable-animations: true
           script: bash run_bot.sh
 
