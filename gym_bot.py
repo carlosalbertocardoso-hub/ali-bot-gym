@@ -589,9 +589,9 @@ def login(device):
 
 def navigate_to_colectivas(device):
     """
-    Pulsa 'Reserva una clase' desde la home del club.
-    Eso lleva directamente a la pantalla de clases colectivas con la lista de tarjetas.
-    No hay selector de días — todas las clases aparecen en una lista única.
+    Intenta llegar a la pantalla de clases colectivas:
+    1. Pulsa 'Reserva una clase' (botón en home del club)
+    2. Fallback: pulsa el tab COLECTIVAS de la bottom nav
     """
     log.info("--- NAVIGATE TO COLECTIVAS ---")
     time.sleep(2)
@@ -599,6 +599,7 @@ def navigate_to_colectivas(device):
     for attempt in range(3):
         dismiss_anr(device)
 
+        # Opción 1: botón "Reserva una clase" en la home
         for label in ("Reserva una clase", "Book a class"):
             el = device(textContains=label)
             if el.exists:
@@ -611,7 +612,20 @@ def navigate_to_colectivas(device):
                 except Exception as exc:
                     log.warning(f"  '{label}' tap failed: {exc}")
 
-        log.info(f"  'Reserva una clase' not found (attempt {attempt+1}/3), retrying...")
+        # Opción 2: tab COLECTIVAS en la bottom nav
+        for label in ("COLECTIVAS", "Colectivas"):
+            el = device(textContains=label)
+            if el.exists:
+                try:
+                    tap_by_bounds(el)
+                    log.info(f"  Tapped tab '{label}' — now on colectivas screen")
+                    time.sleep(3)
+                    screenshot(device, "colectivas_screen")
+                    return True
+                except Exception as exc:
+                    log.warning(f"  Tab '{label}' tap failed: {exc}")
+
+        log.info(f"  COLECTIVAS not found (attempt {attempt+1}/3), retrying...")
         time.sleep(3)
 
     log.warning("Could not navigate to colectivas screen")
