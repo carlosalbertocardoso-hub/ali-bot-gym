@@ -30,7 +30,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y libpulse0 pulseaudio xvfb libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
+          # Solo librerías mínimas para Xvfb y Qt/xcb del emulador; sin pulseaudio
+          # porque el emulador se lanza con -no-audio
+          sudo apt-get install -y xvfb libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
+          # Liberar RAM del host: snapd y unattended-upgrades no se necesitan en CI
+          sudo systemctl stop snapd.service snapd.socket unattended-upgrades.service 2>/dev/null || true
 
       - name: Start virtual display
         run: |
@@ -68,6 +73,23 @@ jobs:
             --device "pixel_2" \
             --force
 
+      - name: Tune AVD config for CI memory constraints
+        run: |
+          # ubuntu-latest tiene ~7 GB RAM. Con 4096M el emulador agota el host
+          # (Python + adb + Xvfb necesitan ~1.5 GB) y el proceso muere por OOM.
+          # Usamos 3072M para el guest y desactivamos features que consumen RAM
+          # sin aportar nada al bot: GPU host acelerada, cámara, sensores.
+          CONFIG="$HOME/.android/avd/GymBotPlayAVD.avd/config.ini"
+          sed -i 's/^hw\.ramSize=.*/hw.ramSize=3072/' "$CONFIG" 2>/dev/null || true
+          sed -i 's/^vm\.heapSize=.*/vm.heapSize=512/' "$CONFIG" 2>/dev/null || true
+          # Desactivar cámara virtual (ahorra ~100 MB en arranque)
+          echo "hw.camera.back=none"  >> "$CONFIG"
+          echo "hw.camera.front=none" >> "$CONFIG"
+          # Forzar 2 cores (el runner tiene 2 vCPUs reales; más cores = más overhead)
+          sed -i 's/^hw\.cpu\.ncore=.*/hw.cpu.ncore=2/' "$CONFIG" 2>/dev/null || true
+          echo "AVD config after tuning:"
+          grep -E 'ramSize|heapSize|camera|ncore' "$CONFIG" || true
+
       - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -75,10 +97,10 @@ jobs:
           target: google_apis_playstore
           arch: x86_64
           profile: pixel_2
-          ram-size: 4096M
-          heap-size: 1024M
+          ram-size: 3072M
+          heap-size: 512M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -no-accel
           disable-animations: true
           script: bash run_bot.sh
 
