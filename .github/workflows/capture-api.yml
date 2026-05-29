@@ -40,7 +40,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y xvfb openssl apksigner zipalign
+          sudo apt-get install -y xvfb openssl apksigner zipalign aapt
           sudo systemctl stop snapd.service snapd.socket unattended-upgrades.service 2>/dev/null || true
 
       - name: Start virtual display
@@ -67,18 +67,38 @@ jobs:
           # Cert para instalar como user-cert en Android (no necesita root)
           openssl x509 -in ~/.mitmproxy/mitmproxy-ca-cert.pem -outform DER -out ~/.mitmproxy/mitm-ca.crt
 
+      - name: Install apktool (needed by objection)
+        run: |
+          sudo apt-get install -y default-jre-headless
+          curl -fL -o /tmp/apktool.jar \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar"
+          sudo mv /tmp/apktool.jar /usr/local/bin/apktool.jar
+          # Wrapper script
+          sudo tee /usr/local/bin/apktool >/dev/null <<'EOF'
+          #!/bin/sh
+          exec java -jar /usr/local/bin/apktool.jar "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/apktool
+          apktool --version
+
       - name: Patch Technogym APK with frida-gadget
         run: |
+          set -e
           # objection patchapk inyecta libfrida-gadget.so en el APK base.
-          # Esto permite ejecutar Frida sin root en el emulador.
           objection patchapk \
             --source technogym-3.43.2-xapk/com.technogym.tgapp.apk \
             --architecture x86_64 \
-            --use-aapt2 || echo "objection patch attempt 1 failed"
-          ls -la technogym-3.43.2-xapk/*.objection.apk || ls -la *.objection.apk || true
+            --use-aapt2
           # objection deja el APK como NOMBRE.objection.apk
-          mv technogym-3.43.2-xapk/com.technogym.tgapp.objection.apk patched-base.apk || \
+          ls -la technogym-3.43.2-xapk/*.objection.apk *.objection.apk 2>/dev/null || true
+          if [ -f technogym-3.43.2-xapk/com.technogym.tgapp.objection.apk ]; then
+            mv technogym-3.43.2-xapk/com.technogym.tgapp.objection.apk patched-base.apk
+          elif [ -f com.technogym.tgapp.objection.apk ]; then
             mv com.technogym.tgapp.objection.apk patched-base.apk
+          else
+            echo "ERROR: no .objection.apk produced"
+            exit 1
+          fi
           ls -la patched-base.apk
 
       - name: Set up Android SDK
