@@ -42,6 +42,18 @@ jobs:
           docker system prune -af 2>/dev/null || true
           df -h
 
+      - name: Add swap (8GB) to survive emulator memory spikes
+        run: |
+          # ubuntu-latest tiene ~16GB RAM pero 0 swap. El emulador Android 14
+          # puede pegar picos de 5-6GB y matar a otros procesos vía OOM killer.
+          # Con 8GB swap aguantamos los picos sin perder el adb daemon.
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          sudo sysctl vm.swappiness=60
+          free -h
+
       - name: Install system dependencies
         run: |
           sudo apt-get update -q
@@ -80,7 +92,7 @@ jobs:
           ram-size: 4096M
           heap-size: 576M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps
           disable-animations: true
           script: bash run_bot.sh
 
