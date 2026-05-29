@@ -17,8 +17,10 @@ on:
 
 jobs:
   reserva:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # macos-13 (Intel) trae HVF nativo y emulador Android estable. ubuntu-latest
+    # se queda sin RAM cuando Technogym renderiza la home y mata al adbd.
+    runs-on: macos-13
+    timeout-minutes: 45
     env:
       FORCE_CLASS: ${{ github.event.inputs.force_class }}
 
@@ -27,53 +29,10 @@ jobs:
         with:
           lfs: true
 
-      - name: Free disk space
+      - name: Show host resources
         run: |
-          # El emulador API 34 necesita ~10 GB para la partición userdata.
-          # ubuntu-latest viene con herramientas que no usamos y consumen 20+ GB.
-          sudo rm -rf /usr/share/dotnet \
-                      /usr/local/lib/android/sdk/ndk \
-                      /opt/ghc \
-                      /usr/share/swift \
-                      /opt/hostedtoolcache/CodeQL \
-                      /usr/local/share/powershell \
-                      /usr/local/lib/node_modules \
-                      /opt/microsoft
-          docker system prune -af 2>/dev/null || true
-          df -h
-
-      - name: Add swap (12GB) to survive emulator memory spikes
-        run: |
-          # Desactivar cualquier swap existente antes de crear el nuevo
-          sudo swapoff -a 2>/dev/null || true
-          sudo rm -f /mnt/swapfile /swapfile
-          # 12GB para sobrevivir picos de Technogym renderizando la home.
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          sudo sysctl vm.swappiness=80
-          # Proteger el adb daemon del OOM killer del host (no se aplica al adbd del emulador,
-          # pero evita que el adb host muera cuando hay presión de memoria).
-          echo "OOM tuning applied"
-          free -h
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y xvfb libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
-          sudo systemctl stop snapd.service snapd.socket unattended-upgrades.service 2>/dev/null || true
-
-      - name: Start virtual display
-        run: |
-          Xvfb :0 -screen 0 1280x800x24 &
-          echo "DISPLAY=:0" >> $GITHUB_ENV
-
-      - name: Enable KVM
-        run: |
-          sudo chmod 666 /dev/kvm
-          ls -la /dev/kvm  # confirmar permisos aplicados
+          sysctl -n hw.memsize hw.ncpu
+          df -h /
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -82,9 +41,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install uiautomator2
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
 
       - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
@@ -96,7 +52,9 @@ jobs:
           ram-size: 4096M
           heap-size: 576M
           avd-name: GymBotPlayAVD
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps
+          # En macOS-13 el emulador usa HVF. No hace falta -no-window porque ya es headless por defecto en CI;
+          # tampoco -gpu swiftshader_indirect (HVF acelera la GPU nativa).
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps
           disable-animations: true
           script: bash run_bot.sh
 
