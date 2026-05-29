@@ -588,41 +588,33 @@ def login(device):
 # ============================================================
 
 def navigate_to_colectivas(device):
+    """
+    Pulsa 'Reserva una clase' desde la home del club.
+    Eso lleva directamente a la pantalla de clases colectivas con la lista de tarjetas.
+    No hay selector de días — todas las clases aparecen en una lista única.
+    """
     log.info("--- NAVIGATE TO COLECTIVAS ---")
     time.sleep(2)
 
     for attempt in range(3):
         dismiss_anr(device)
 
-        # Paso 1: pulsar "Reserva una clase" para entrar a la sección de reservas
         for label in ("Reserva una clase", "Book a class"):
             el = device(textContains=label)
             if el.exists:
                 try:
                     tap_by_bounds(el)
-                    log.info(f"  Tapped '{label}'")
-                    time.sleep(3)
-                    break
-                except Exception as exc:
-                    log.warning(f"  '{label}' tap failed: {exc}")
-
-        # Paso 2: desde la pantalla de reservas, buscar y pulsar tab COLECTIVAS
-        for col_label in ("COLECTIVAS", "Colectivas"):
-            el2 = device(textContains=col_label)
-            if el2.exists:
-                try:
-                    tap_by_bounds(el2)
-                    log.info(f"  Tapped COLECTIVAS tab")
+                    log.info(f"  Tapped '{label}' — now on colectivas screen")
                     time.sleep(3)
                     screenshot(device, "colectivas_screen")
                     return True
                 except Exception as exc:
-                    log.warning(f"  COLECTIVAS tap failed: {exc}")
+                    log.warning(f"  '{label}' tap failed: {exc}")
 
-        log.info(f"  COLECTIVAS not reached (attempt {attempt+1}/3), retrying...")
+        log.info(f"  'Reserva una clase' not found (attempt {attempt+1}/3), retrying...")
         time.sleep(3)
 
-    log.warning("Could not navigate to COLECTIVAS")
+    log.warning("Could not navigate to colectivas screen")
     screenshot(device, "nav_failed")
     save_hierarchy(device, "nav_failed_hierarchy")
     return False
@@ -756,9 +748,60 @@ def find_and_tap_booking_button(device, nombre, hora):
     return None
 
 
+def select_station(device):
+    """
+    Maneja la pantalla 'Elige tu estación' que aparece en clases de spinning (CICLO).
+    Pulsa cualquier bici con texto 'Disponible' y luego el botón RESERVAR.
+    """
+    if not device(textContains="Elige tu estación").exists and \
+       not device(textContains="Elige tu estacion").exists:
+        return False
+
+    log.info("  Station selection screen detected")
+    screenshot(device, "station_selection")
+
+    # Pulsar cualquier plaza disponible
+    for label in ("Disponible", "Available"):
+        el = device(textContains=label)
+        if el.exists:
+            try:
+                tap_by_bounds(el)
+                log.info(f"  Selected station: {label}")
+                time.sleep(2)
+                break
+            except Exception as exc:
+                log.warning(f"  Station tap failed: {exc}")
+
+    # Pulsar RESERVAR en la parte inferior
+    for label in ("RESERVAR", "Reservar", "RESERVE"):
+        el = device(textContains=label)
+        if el.exists:
+            try:
+                tap_by_bounds(el)
+                log.info("  Tapped RESERVAR on station screen")
+                time.sleep(3)
+                return True
+            except Exception as exc:
+                log.warning(f"  RESERVAR tap failed on station screen: {exc}")
+
+    log.warning("  Could not complete station selection")
+    return False
+
+
 def confirm_booking(device):
-    """Confirma diálogo de confirmación si aparece tras pulsar RESERVAR/ÚNETE."""
-    for text in ("CONFIRMAR", "Confirmar", "Confirm", "OK", "ACEPTAR", "Aceptar"):
+    """Descarta el diálogo '¿Quieres guardar en calendario?' que aparece tras reservar."""
+    for text in ("AHORA NO", "Ahora no", "NOT NOW", "Now now"):
+        el = device(textContains=text)
+        if el.exists:
+            try:
+                el.click()
+                log.info(f"  Dismissed calendar dialog: {text}")
+                time.sleep(2)
+                return True
+            except Exception:
+                pass
+    # Fallback: otros textos de confirmación genéricos
+    for text in ("CONFIRMAR", "Confirmar", "OK", "ACEPTAR"):
         el = device(textContains=text)
         if el.exists:
             try:
@@ -773,22 +816,15 @@ def confirm_booking(device):
 
 def book_class_with_refresh(device, clase):
     """
-    Selecciona el día y reintenta reservar durante hasta 3 minutos,
-    refrescando la pantalla cada 5 segundos.
+    Reintenta reservar durante hasta 3 minutos refrescando cada 5 segundos.
+    No hay selector de días — la lista muestra todas las clases juntas.
+    Para CICLO maneja la pantalla intermedia de selección de bici.
     """
     nombre = clase["nombre"]
     hora = clase["hora"]
-    dia = clase["dia_clase"]
 
-    log.info(f"--- BOOK: {nombre} {hora} (weekday {dia}) ---")
-
-    if not select_day(device, dia):
-        screenshot(device, "day_not_found")
-        save_hierarchy(device, "day_not_found")
-        return False
-
-    time.sleep(3)
-    screenshot(device, "day_selected")
+    log.info(f"--- BOOK: {nombre} {hora} ---")
+    screenshot(device, "colectivas_before_book")
 
     deadline = time.time() + 180
     attempt = 0
@@ -805,10 +841,14 @@ def book_class_with_refresh(device, clase):
             return True
 
         if result in ('booked', 'waitlist'):
-            time.sleep(4)
-            screenshot(device, f"after_{result}_tap")
-            confirm_booking(device)
             time.sleep(3)
+            screenshot(device, f"after_{result}_tap")
+            # Para CICLO: puede aparecer pantalla de selección de bici
+            select_station(device)
+            time.sleep(2)
+            # Descartar diálogo de calendario
+            confirm_booking(device)
+            time.sleep(2)
             screenshot(device, result)
             log.info(f"{'RESERVED' if result == 'booked' else 'WAITLIST'}: {nombre} {hora}")
             return True
@@ -818,16 +858,14 @@ def book_class_with_refresh(device, clase):
             screenshot(device, "class_full")
             return False
 
-        # Tarjeta no disponible aún — pull-to-refresh y reseleccionar día
-        log.info("  Card not available — refreshing")
+        # Tarjeta no disponible aún (SEGUIR) — pull-to-refresh y esperar
+        log.info("  RESERVAR not found yet — refreshing")
         time.sleep(5)
         try:
             device.swipe(540, 600, 540, 1200, duration=0.4)
             time.sleep(2)
         except Exception:
             pass
-        select_day(device, dia)
-        time.sleep(2)
 
     log.warning(f"Booking timeout: {nombre} {hora}")
     screenshot(device, "book_timeout")
