@@ -25,4 +25,12 @@ adb -s "$SERIAL" install-multiple -r \
   technogym-3.43.2-xapk/config.xxhdpi.apk \
   technogym-3.43.2-xapk/config.arm64_v8a.apk
 python -m uiautomator2 init -s "$SERIAL"
+
+# Proteger adbd y el server uiautomator2 dentro del emulador del OOM killer de Android.
+# Cuando Technogym renderiza la home, el lowmemorykiller mata "procesos no-app" como
+# adbd, y la sesión se queda como "device offline" — irrecuperable sin reboot.
+echo "Protecting adbd from OOM killer inside emulator..."
+adb -s "$SERIAL" shell "su 0 sh -c 'for pid in \$(pgrep adbd); do echo -1000 > /proc/\$pid/oom_score_adj 2>/dev/null || true; done'" || true
+adb -s "$SERIAL" shell "su 0 sh -c 'for pid in \$(pgrep -f uiautomator); do echo -900 > /proc/\$pid/oom_score_adj 2>/dev/null || true; done'" || true
+
 DEVICE_SERIAL="$SERIAL" python gym_bot.py

@@ -42,16 +42,20 @@ jobs:
           docker system prune -af 2>/dev/null || true
           df -h
 
-      - name: Add swap (8GB) to survive emulator memory spikes
+      - name: Add swap (12GB) to survive emulator memory spikes
         run: |
           # Desactivar cualquier swap existente antes de crear el nuevo
           sudo swapoff -a 2>/dev/null || true
-          sudo rm -f /mnt/swapfile
-          sudo fallocate -l 8G /mnt/swapfile
+          sudo rm -f /mnt/swapfile /swapfile
+          # 12GB para sobrevivir picos de Technogym renderizando la home.
+          sudo fallocate -l 12G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
           sudo swapon /mnt/swapfile
-          sudo sysctl vm.swappiness=60
+          sudo sysctl vm.swappiness=80
+          # Proteger el adb daemon del OOM killer del host (no se aplica al adbd del emulador,
+          # pero evita que el adb host muera cuando hay presión de memoria).
+          echo "OOM tuning applied"
           free -h
 
       - name: Install system dependencies

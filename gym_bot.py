@@ -218,6 +218,15 @@ def safe_dump(device, retries=3):
 
 def _wait_for_adb_online(timeout=60):
     deadline = time.time() + timeout
+    # Primer paso: reiniciar el servidor ADB del host. El daemon muere por OOM en CI
+    # y se queda colgado; un kill-server + start-server lo trae de vuelta.
+    try:
+        subprocess.run([adb_path(), "kill-server"], capture_output=True, timeout=10)
+        time.sleep(2)
+        subprocess.run([adb_path(), "start-server"], capture_output=True, timeout=15)
+        time.sleep(3)
+    except Exception as exc:
+        log.warning(f"  adb server restart failed: {exc}")
     while time.time() < deadline:
         if emulator_is_online():
             log.info("ADB back online")
@@ -274,7 +283,12 @@ def xml_visible_strings(xml):
 
 
 def tap_adb(x, y):
-    run_adb("shell", "input", "tap", str(x), str(y), timeout=10)
+    result = run_adb("shell", "input", "tap", str(x), str(y), timeout=10)
+    if result.returncode == 124 or "device" in (result.stderr or "").lower() and "not found" in (result.stderr or "").lower():
+        # tap colgado o device offline → reinicia el server y reintenta una vez
+        log.warning(f"  tap_adb stalled/offline ({result.stderr.strip()[:80]}) — restarting adb server")
+        _wait_for_adb_online(timeout=45)
+        run_adb("shell", "input", "tap", str(x), str(y), timeout=10)
     time.sleep(0.8)
 
 
@@ -614,8 +628,8 @@ def navigate_to_colectivas(device):
     except Exception:
         pass
 
+    # NO screenshot aquí — device.screenshot() es JSON-RPC y dispara OOM en CI
     time.sleep(3)
-    screenshot(device, "after_colectivas_tap")
     log.info("  COLECTIVAS tap completed (assumed success)")
     return True
 
