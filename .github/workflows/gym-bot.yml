@@ -44,13 +44,11 @@ jobs:
 
       - name: Add swap (8GB) to survive emulator memory spikes
         run: |
-          # ubuntu-latest tiene ~16GB RAM pero 0 swap. El emulador Android 14
-          # puede pegar picos de 5-6GB y matar a otros procesos vía OOM killer.
-          # Con 8GB swap aguantamos los picos sin perder el adb daemon.
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # /swapfile está ocupado en ubuntu-latest; usamos /mnt que tiene más espacio libre.
+          sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=8192 status=progress
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           sudo sysctl vm.swappiness=60
           free -h
 
