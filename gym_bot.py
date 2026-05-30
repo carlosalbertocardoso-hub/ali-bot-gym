@@ -1498,16 +1498,10 @@ def main():
         device.screen_on()
         time.sleep(2)
 
-        # 4. Traer Technogym al frente
-        # El cloud phone de Geelark ya tiene la app instalada y logueada.
-        # Usamos monkey (intent LAUNCHER) para traerla al frente sin
-        # reiniciarla — preserva el estado de sesion y evita la pantalla
-        # de seleccion de club que aparece al arrancar desde cero.
-        log.info("Bringing Technogym to foreground via monkey...")
-        run_adb(serial, "shell", "monkey", "-p", APP_PACKAGE,
-                "-c", "android.intent.category.LAUNCHER", "1", timeout=15)
-        log.info("App in foreground — waiting 10s...")
-        time.sleep(10)
+        # 4. La app ya esta al frente en el cloud phone de Geelark.
+        # No tocar nada — solo encender pantalla y esperar un momento.
+        log.info("Technogym already running on cloud phone — screen on, wait 5s...")
+        time.sleep(5)
 
         # 5. Login
         if not login(device, serial):
