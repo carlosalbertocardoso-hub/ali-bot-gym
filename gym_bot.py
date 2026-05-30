@@ -834,22 +834,23 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
             return 'waitlist'
         return 'full'
 
-    m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="RESERVAR"', block)
-    if not m:
-        m = re.search(r'text="RESERVAR"[^>]*/?>?\s*<[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', block)
-    if m:
-        x1, y1, x2, y2 = map(int, m.groups())
-        tap_adb(serial, (x1 + x2) // 2, (y1 + y2) // 2)
-        log.info(f"  Tapped RESERVAR at ({(x1+x2)//2}, {(y1+y2)//2})")
-        return 'booked'
+    for action_text, result in (("RESERVAR", "booked"), ("SEGUIR", "followed")):
+        m = re.search(rf'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="{action_text}"', block)
+        if not m:
+            m = re.search(rf'text="{action_text}"[^>]*/?>?\s*<[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', block)
+        if m:
+            x1, y1, x2, y2 = map(int, m.groups())
+            tap_adb(serial, (x1 + x2) // 2, (y1 + y2) // 2)
+            log.info(f"  Tapped {action_text} at ({(x1+x2)//2}, {(y1+y2)//2})")
+            return result
 
-    el = device(text="RESERVAR")
-    if el.exists:
-        el.click()
-        log.info("  Clicked RESERVAR via u2")
-        return 'booked'
+        el = device(text=action_text)
+        if el.exists:
+            el.click()
+            log.info(f"  Clicked {action_text} via u2")
+            return result
 
-    log.info("  RESERVAR not found in card block")
+    log.info("  RESERVAR/SEGUIR not found in card block")
     return None
 
 
@@ -935,15 +936,21 @@ def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
             screenshot(device, serial, "already_booked")
             return True
 
-        if result in ('booked', 'waitlist'):
+        if result in ('booked', 'waitlist', 'followed'):
             time.sleep(3)
             screenshot(device, serial, f"after_{result}_tap")
-            select_station(device, serial)
-            time.sleep(2)
-            confirm_booking(device)
-            time.sleep(2)
+            if result != 'followed':
+                select_station(device, serial)
+                time.sleep(2)
+                confirm_booking(device)
+                time.sleep(2)
             screenshot(device, serial, result)
-            log.info(f"{'RESERVED' if result == 'booked' else 'WAITLIST'}: {nombre} {hora}")
+            result_label = {
+                'booked': 'RESERVED',
+                'waitlist': 'WAITLIST',
+                'followed': 'FOLLOWED',
+            }[result]
+            log.info(f"{result_label}: {nombre} {hora}")
             return True
 
         if result == 'full':
@@ -951,7 +958,7 @@ def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
             screenshot(device, serial, "class_full")
             return False
 
-        log.info("  RESERVAR not found yet — refreshing")
+        log.info("  RESERVAR/SEGUIR not found yet — refreshing")
         time.sleep(5)
         try:
             device.swipe(540, 600, 540, 1200, duration=0.4)
