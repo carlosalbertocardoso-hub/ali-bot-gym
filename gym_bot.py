@@ -677,14 +677,18 @@ def navigate_to_colectivas(device, serial: str) -> bool:
             return ""
 
     def is_colectivas_visual(stage: str) -> bool:
-        # 1) XML primero: es mucho mas fiable que el OCR para esta pantalla.
-        #    El OCR de las tarjetas grises suele salir corrupto, asi que no se
-        #    debe abortar la navegacion solo porque el OCR no lea SEGUIR.
+        # 1) XML: dump_hierarchy puede devolver el arbol stale si se llama
+        #    justo despues de un tap. Esperamos a que u2 vea la pantalla nueva.
+        try:
+            device.wait_activity(APP_PACKAGE, timeout=3)
+        except Exception:
+            pass
         try:
             xml = safe_dump(device)
             if is_colectivas_screen(xml):
                 log.info("  Navigation confirmed by XML (Colectivas screen)")
                 return True
+            log.info(f"  XML strings sample: {xml_visible_strings(xml)[:8]}")
         except Exception as exc:
             log.warning(f"  XML confirm failed: {exc}")
 
@@ -693,11 +697,11 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         safe_stage = re.sub(r"[^A-Za-z0-9_]+", "_", stage).strip("_").lower()
         words = ocr_screen_words(device, serial, f"ocr_nav_{safe_stage}")
         joined = "".join(compact_norm(word["text"]) for word in words)
-        # Solo marcadores que existen UNICAMENTE en la lista de clases.
-        # No incluir COLECTIVAS ni ENTRENADOR sueltos: ambos aparecen tambien
-        # en el bottom-nav del home y darian falso positivo.
+        # Marcadores que existen SOLO en la pantalla de clases, nunca en home:
+        #   HORADEINICIO / SEGUIR / RESERVAR / CLUB (pestana hermana)
+        # CLUB es clave: el OCR lo lee fiablemente y no aparece en el home.
         markers = (
-            "HORADEINICIO", "SEGUIR", "RESERVAR", "RESERVADA", "CANCELAR",
+            "HORADEINICIO", "SEGUIR", "RESERVAR", "RESERVADA", "CANCELAR", "CLUB",
         )
         matched = next((marker for marker in markers if marker in joined), None)
         if matched:
@@ -709,6 +713,7 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         if day_hits >= 3:
             log.info(f"  Navigation confirmed by OCR day selector ({day_hits} days)")
             return True
+        log.info(f"  OCR joined (nav confirm): {joined[:120]}")
         return False
 
     def tap_nav_text_by_ocr(stage: str, targets, y_min: float = 0.0, y_max: float = 1.0) -> bool:
