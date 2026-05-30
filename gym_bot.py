@@ -16,6 +16,7 @@ import time
 import uuid
 import logging
 import requests
+import unicodedata
 from datetime import datetime, timedelta
 
 import uiautomator2 as u2
@@ -58,7 +59,7 @@ CLASES = [
 HOME_INDICATORS = [
     "colectivas", "reserva una clase", "tus citas", "entrenador",
     "explorar", "movergy", "tus planes", "sports center", "mercantil",
-    "book a class", "your appointments",
+    "book a class", "your appointments", "reservar cita",
 ]
 AUTHENTICATED_INDICATORS = [
     EMAIL.lower(), "daily moves", "movergy index", "coach", "results",
@@ -309,6 +310,34 @@ def xml_visible_strings(xml: str):
     for attr in ("text", "content-desc", "resource-id"):
         values.extend(v for v in re.findall(fr'{attr}="([^"]+)"', xml) if v.strip())
     return values
+
+
+def normalize_text(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text or "")
+    return "".join(ch for ch in text if not unicodedata.combining(ch)).upper()
+
+
+def xml_nodes_with_bounds(xml: str):
+    nodes = []
+    for tag in re.findall(r"<node\b[^>]*>", xml):
+        text_match = re.search(r'text="([^"]*)"', tag)
+        desc_match = re.search(r'content-desc="([^"]*)"', tag)
+        bounds_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+        if not bounds_match:
+            continue
+        text = (text_match.group(1) if text_match else "") or \
+               (desc_match.group(1) if desc_match else "")
+        if not text.strip():
+            continue
+        x1, y1, x2, y2 = map(int, bounds_match.groups())
+        nodes.append({
+            "text": text.strip(),
+            "norm": normalize_text(text),
+            "bounds": (x1, y1, x2, y2),
+            "cx": (x1 + x2) // 2,
+            "cy": (y1 + y2) // 2,
+        })
+    return nodes
 
 
 def tap_adb(serial: str, x: int, y: int):
@@ -588,56 +617,80 @@ def login(device, serial: str) -> bool:
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
 
-    # Loguear pantalla inicial para diagnóstico
-    try:
-        xml0 = safe_dump(device)
-        visible0 = xml_visible_strings(xml0)
-        log.info(f"  Initial screen visible: {visible0[:15]}")
-    except Exception as exc:
-        log.warning(f"  Could not dump initial screen: {exc}")
+    def is_colectivas_screen(xml: str) -> bool:
+        lowered = xml.lower()
+        return (
+            "hora de inicio" in lowered or
+            ("colectivas" in lowered and "entrenador" in lowered and "club" in lowered)
+        )
 
-    # Paso 1: ir al tab Club (x=216 en pantalla 720px)
-    # Tabs: Entrenador=72, Club=216, Explorar=360, Retos=504, Resultados=648
-    CLUB_X, CLUB_Y = 216, 1320
-    log.info(f"  tap Club ({CLUB_X},{CLUB_Y})")
-    tap_adb(serial, CLUB_X, CLUB_Y)
-    time.sleep(4)
+    def dump_stage(stage: str) -> str:
+        try:
+            xml = safe_dump(device)
+            visible = xml_visible_strings(xml)
+            log.info(f"  {stage} visible: {visible[:15]}")
+            return xml
+        except Exception as exc:
+            log.warning(f"  Could not dump {stage}: {exc}")
+            return ""
 
-    try:
-        xml1 = safe_dump(device)
-        visible1 = xml_visible_strings(xml1)
-        log.info(f"  After Club tap, visible: {visible1[:15]}")
-        save_hierarchy(device, "after_club_hierarchy")
-    except Exception as exc:
-        log.warning(f"  Could not dump after Club tap: {exc}")
-        xml1 = ""
+    xml0 = dump_stage("Initial screen")
+    if is_colectivas_screen(xml0):
+        log.info("  Already on Colectivas")
+        return True
 
-    # Paso 2: dentro de Club, tocar "Reserva una clase"
-    for txt in ("Reserva una clase", "Book a class", "RESERVA UNA CLASE"):
+    # Entrada principal desde Entrenador: card/boton "Reserva una clase".
+    for txt in ("Reserva una clase", "Reservar cita", "Book a class", "RESERVA UNA CLASE"):
         try:
             el = device(textContains=txt)
             if el.exists:
                 tap_by_bounds(serial, el)
                 log.info(f"  Tapped '{txt}'")
                 time.sleep(4)
-                xml2 = safe_dump(device)
-                visible2 = xml_visible_strings(xml2)
-                log.info(f"  After '{txt}' tap, visible: {visible2[:15]}")
+                xml2 = dump_stage(f"After '{txt}' tap")
                 screenshot(device, serial, "after_navigate_colectivas")
                 save_hierarchy(device, "after_navigate_hierarchy")
-                log.info("  Navigation completed")
-                return True
+                if is_colectivas_screen(xml2):
+                    log.info("  Navigation completed")
+                    return True
         except Exception as exc:
             log.warning(f"  Tap '{txt}' failed: {exc}")
 
-    log.warning("  'Reserva una clase' not found in Club — dumping for diagnosis")
+    # Fallback: pestana inferior COLECTIVAS.
+    for txt in ("COLECTIVAS", "Colectivas"):
+        try:
+            el = device(textContains=txt)
+            if el.exists:
+                tap_by_bounds(serial, el)
+                log.info(f"  Tapped bottom tab '{txt}'")
+                time.sleep(4)
+                xml3 = dump_stage(f"After '{txt}' tab")
+                screenshot(device, serial, "after_navigate_colectivas")
+                save_hierarchy(device, "after_navigate_hierarchy")
+                if is_colectivas_screen(xml3):
+                    log.info("  Navigation completed")
+                    return True
+        except Exception as exc:
+            log.warning(f"  Tap bottom tab '{txt}' failed: {exc}")
+
+    # Ultimo fallback por coordenadas relativas: la pestana Colectivas es la segunda del bottom nav.
     try:
+        width, height = device.window_size()
+        x, y = int(width * 0.30), int(height * 0.94)
+        log.info(f"  Coordinate fallback tap Colectivas ({x},{y})")
+        tap_adb(serial, x, y)
+        time.sleep(4)
+        xml4 = dump_stage("After coordinate Colectivas tap")
         save_hierarchy(device, "after_navigate_hierarchy")
         screenshot(device, serial, "after_navigate_colectivas")
-    except Exception:
-        pass
-    log.info("  Navigation completed (without confirmed Colectivas)")
-    return True
+        if is_colectivas_screen(xml4):
+            log.info("  Navigation completed")
+            return True
+    except Exception as exc:
+        log.warning(f"  Coordinate fallback failed: {exc}")
+
+    log.warning("  Could not confirm Colectivas screen")
+    return False
 
 
 
@@ -663,6 +716,44 @@ def select_day(device, serial: str, dia_clase: int) -> bool:
         xml = safe_dump(device)
     except Exception:
         xml = ""
+
+    nodes = xml_nodes_with_bounds(xml)
+    target_labels = {normalize_text(label) for label in DAY_LABELS[dia_clase]}
+    label_nodes = [n for n in nodes if n["norm"] in target_labels]
+    number_nodes = [n for n in nodes if n["text"] == day_num]
+
+    best_pair = None
+    best_score = None
+    for label_node in label_nodes:
+        for number_node in number_nodes:
+            dx = abs(label_node["cx"] - number_node["cx"])
+            dy = number_node["cy"] - label_node["cy"]
+            if dx <= 90 and 0 <= dy <= 180:
+                score = dx + dy
+                if best_score is None or score < best_score:
+                    best_pair = (label_node, number_node)
+                    best_score = score
+    if best_pair:
+        label_node, number_node = best_pair
+        log.info(f"  Selected day by date strip: {label_node['text']} {number_node['text']}")
+        tap_adb(serial, number_node["cx"], number_node["cy"])
+        time.sleep(2)
+        return True
+
+    try:
+        width, height = device.window_size()
+        candidates = [
+            n for n in number_nodes
+            if int(height * 0.22) <= n["cy"] <= int(height * 0.45)
+        ]
+        if len(candidates) == 1:
+            n = candidates[0]
+            log.info(f"  Selected day by visible number: {n['text']}")
+            tap_adb(serial, n["cx"], n["cy"])
+            time.sleep(2)
+            return True
+    except Exception:
+        pass
 
     for label in DAY_LABELS[dia_clase]:
         pattern = rf'text="({re.escape(label)}\s*{re.escape(day_num)}|{re.escape(day_num)}\s*{re.escape(label)})"'
