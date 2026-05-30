@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       force_class:
-        description: 'Forzar clase: "NOMBRE,HH:MM,dia_semana" (ej: CICLO,18:00,3)'
+        description: 'Forzar clase: "NOMBRE,HH:MM,dia_semana" (ej: POWER,19:00,3)'
         required: false
         default: ''
 
@@ -20,81 +20,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      FORCE_CLASS: ${{ github.event.inputs.force_class }}
+      FORCE_CLASS:       ${{ github.event.inputs.force_class }}
+      GEELARK_APP_ID:    ${{ secrets.GEELARK_APP_ID }}
+      GEELARK_API_KEY:   ${{ secrets.GEELARK_API_KEY }}
+      GEELARK_PHONE_ID:  ${{ secrets.GEELARK_PHONE_ID }}
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet \
-                      /usr/local/lib/android/sdk/ndk \
-                      /opt/ghc \
-                      /usr/share/swift \
-                      /opt/hostedtoolcache/CodeQL \
-                      /usr/local/share/powershell \
-                      /usr/local/lib/node_modules \
-                      /opt/microsoft
-          docker system prune -af 2>/dev/null || true
-          df -h
-
-      - name: Add swap (12GB)
-        run: |
-          sudo swapoff -a 2>/dev/null || true
-          sudo rm -f /mnt/swapfile /swapfile
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          sudo sysctl vm.swappiness=80
-          free -h
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y xvfb libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
-          sudo systemctl stop snapd.service snapd.socket unattended-upgrades.service 2>/dev/null || true
-
-      - name: Start virtual display
-        run: |
-          Xvfb :0 -screen 0 1280x800x24 &
-          echo "DISPLAY=:0" >> $GITHUB_ENV
-
-      - name: Enable KVM
-        run: |
-          sudo chmod 666 /dev/kvm
-          ls -la /dev/kvm
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install uiautomator2
+      - name: Install Python dependencies
+        run: pip install uiautomator2 requests
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install ADB
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y adb
 
-      - name: Start emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          # API 30 + google_apis (sin Play Store) consume ~1.5GB menos RAM que
-          # API 34 con Play Store. Riesgo conocido: Technogym 3.43.2 puede
-          # quedarse en splash si Play Services es demasiado viejo.
-          api-level: 30
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          ram-size: 4096M
-          heap-size: 512M
-          avd-name: GymBotAVD30
-          emulator-options: -no-snapshot-load -no-snapshot-save -no-audio -no-metrics -no-boot-anim -gpu swiftshader_indirect -no-window -memory 4096 -cores 2 -camera-back none -camera-front none -netfast -no-sim -no-passive-gps
-          disable-animations: true
-          script: bash run_bot.sh
+      - name: Run bot
+        run: python gym_bot.py
 
       - name: Upload screenshots on failure
         if: always()
@@ -104,7 +52,6 @@ jobs:
           path: |
             screenshots/
             login_failed_hierarchy.xml
-            postlogin_iter*.xml
           retention-days: 7
 
       - name: Upload log
