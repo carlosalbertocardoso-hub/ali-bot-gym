@@ -130,8 +130,12 @@ class GeelarkClient:
     def phone_status(self, phone_id: str) -> str:
         """Devuelve el status del teléfono (p.ej. 'running', 'stopped')."""
         data = self.post("/open/v1/phone/list", {"page": 1, "pageSize": 50})
-        for phone in data.get("data", {}).get("list", []):
-            if phone.get("id") == phone_id:
+        phones = data.get("data", {}).get("list", [])
+        if not phones:
+            log.info(f"  phone/list returned no phones: {data}")
+        for phone in phones:
+            log.info(f"  phone entry: id={phone.get('id')} serialNo={phone.get('serialNo')} status={phone.get('status')}")
+            if phone.get("id") == phone_id or phone.get("serialNo") == phone_id:
                 return phone.get("status", "unknown")
         return "unknown"
 
