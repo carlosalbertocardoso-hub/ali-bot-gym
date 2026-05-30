@@ -639,55 +639,106 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         log.info("  Already on Colectivas")
         return True
 
-    # Entrada principal desde Entrenador: card/boton "Reserva una clase".
-    for txt in ("Reserva una clase", "Reservar cita", "Book a class", "RESERVA UNA CLASE"):
-        try:
-            el = device(textContains=txt)
-            if el.exists:
-                tap_by_bounds(serial, el)
-                log.info(f"  Tapped '{txt}'")
-                time.sleep(4)
-                xml2 = dump_stage(f"After '{txt}' tap")
-                screenshot(device, serial, "after_navigate_colectivas")
-                save_hierarchy(device, "after_navigate_hierarchy")
-                if is_colectivas_screen(xml2):
-                    log.info("  Navigation completed")
-                    return True
-        except Exception as exc:
-            log.warning(f"  Tap '{txt}' failed: {exc}")
+    def try_booking_entry(stage: str) -> bool:
+        for txt in ("Reserva una clase", "Reservar cita", "Book a class", "RESERVA UNA CLASE"):
+            try:
+                el = device(textContains=txt)
+                if el.exists:
+                    tap_by_bounds(serial, el)
+                    log.info(f"  Tapped '{txt}'")
+                    time.sleep(5)
+                    xml = dump_stage(f"After '{txt}' tap")
+                    screenshot(device, serial, "after_navigate_colectivas")
+                    save_hierarchy(device, "after_navigate_hierarchy")
+                    if is_colectivas_screen(xml):
+                        log.info("  Navigation completed")
+                        return True
+            except Exception as exc:
+                log.warning(f"  Tap '{txt}' failed: {exc}")
 
-    # Fallback: pestana inferior COLECTIVAS.
-    for txt in ("COLECTIVAS", "Colectivas"):
+        try:
+            width, height = device.window_size()
+            x, y = int(width * 0.50), int(height * 0.76)
+            log.info(f"  Coordinate fallback tap booking entry from {stage} ({x},{y})")
+            tap_adb(serial, x, y)
+            time.sleep(5)
+            xml = dump_stage(f"After booking-entry coordinate tap from {stage}")
+            screenshot(device, serial, "after_navigate_colectivas")
+            save_hierarchy(device, "after_navigate_hierarchy")
+            if is_colectivas_screen(xml):
+                log.info("  Navigation completed")
+                return True
+        except Exception as exc:
+            log.warning(f"  Booking-entry coordinate fallback failed: {exc}")
+        return False
+
+    # Entrada principal desde Entrenador: card/boton "Reserva una clase".
+    if try_booking_entry("initial screen"):
+        return True
+
+    # Fallback: pestana inferior. En la app se ve como COLECTIVAS, pero el
+    # arbol de accesibilidad de esta build la expone como Club.
+    for txt in ("COLECTIVAS", "Colectivas", "Club"):
         try:
             el = device(textContains=txt)
             if el.exists:
                 tap_by_bounds(serial, el)
                 log.info(f"  Tapped bottom tab '{txt}'")
-                time.sleep(4)
-                xml3 = dump_stage(f"After '{txt}' tab")
+                time.sleep(5)
+                xml2 = dump_stage(f"After '{txt}' tab")
                 screenshot(device, serial, "after_navigate_colectivas")
                 save_hierarchy(device, "after_navigate_hierarchy")
-                if is_colectivas_screen(xml3):
+                if is_colectivas_screen(xml2):
                     log.info("  Navigation completed")
+                    return True
+                if try_booking_entry(f"{txt} tab"):
                     return True
         except Exception as exc:
             log.warning(f"  Tap bottom tab '{txt}' failed: {exc}")
 
-    # Ultimo fallback por coordenadas relativas: la pestana Colectivas es la segunda del bottom nav.
+    # Ultimo fallback por coordenadas relativas: la pestana Colectivas/Club es la segunda del bottom nav.
     try:
         width, height = device.window_size()
         x, y = int(width * 0.30), int(height * 0.94)
-        log.info(f"  Coordinate fallback tap Colectivas ({x},{y})")
+        log.info(f"  Coordinate fallback tap Colectivas/Club ({x},{y})")
         tap_adb(serial, x, y)
-        time.sleep(4)
-        xml4 = dump_stage("After coordinate Colectivas tap")
+        time.sleep(5)
+        xml3 = dump_stage("After coordinate Colectivas/Club tap")
+        save_hierarchy(device, "after_navigate_hierarchy")
+        screenshot(device, serial, "after_navigate_colectivas")
+        if is_colectivas_screen(xml3):
+            log.info("  Navigation completed")
+            return True
+        if try_booking_entry("coordinate tab"):
+            return True
+    except Exception as exc:
+        log.warning(f"  Coordinate fallback failed: {exc}")
+
+    # En algunos estados el Club carga una cabecera y hay que tocar la subpestana
+    # superior Colectivas antes de que aparezcan filtros y tarjetas.
+    try:
+        width, height = device.window_size()
+        x, y = int(width * 0.24), int(height * 0.28)
+        log.info(f"  Coordinate fallback tap top Colectivas subtab ({x},{y})")
+        tap_adb(serial, x, y)
+        time.sleep(5)
+        xml4 = dump_stage("After top Colectivas subtab tap")
         save_hierarchy(device, "after_navigate_hierarchy")
         screenshot(device, serial, "after_navigate_colectivas")
         if is_colectivas_screen(xml4):
             log.info("  Navigation completed")
             return True
     except Exception as exc:
-        log.warning(f"  Coordinate fallback failed: {exc}")
+        log.warning(f"  Top Colectivas subtab fallback failed: {exc}")
+
+    for txt in ("Hora de inicio", "SEGUIR", "RESERVAR"):
+        try:
+            el = device(textContains=txt)
+            if el.exists:
+                log.info(f"  Navigation completed by visible marker: {txt}")
+                return True
+        except Exception as exc:
+            log.warning(f"  Marker check failed for '{txt}': {exc}")
 
     log.warning("  Could not confirm Colectivas screen")
     return False
