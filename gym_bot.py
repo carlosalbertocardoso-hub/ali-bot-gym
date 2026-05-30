@@ -164,15 +164,16 @@ class GeelarkClient:
 
     def enable_adb(self, phone_id: str):
         log.info("Geelark: enabling ADB")
-        self.post("/open/v1/adb/setStatus", {"id": phone_id, "open": True})
+        self.post("/open/v1/adb/setStatus", {"ids": [phone_id], "open": True})
         time.sleep(5)  # async op — esperar antes de pedir datos
 
     def get_adb_info(self, phone_id: str) -> dict:
         """Devuelve {'ip': ..., 'port': ..., 'password': ...}."""
         data = self.post("/open/v1/adb/getData", {"ids": [phone_id]})
-        items = data.get("data", {}).get("list", []) or data.get("data", [])
+        d = data.get("data", {})
+        items = d.get("items") or d.get("list") or (d if isinstance(d, list) else [])
         if not items:
-            raise RuntimeError(f"No ADB info returned for phone {phone_id}")
+            raise RuntimeError(f"No ADB info returned for phone {phone_id}: {data}")
         return items[0]
 
 
