@@ -593,49 +593,50 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         xml0 = safe_dump(device)
         visible0 = xml_visible_strings(xml0)
         log.info(f"  Initial screen visible: {visible0[:15]}")
-        save_hierarchy(device, "before_navigate_hierarchy")
     except Exception as exc:
         log.warning(f"  Could not dump initial screen: {exc}")
-        xml0 = ""
 
-    # 1. Intentar tocar "Reserva una clase" directamente (está en la tab Entrenador/home)
+    # Paso 1: ir al tab Club (x=216 en pantalla 720px)
+    # Tabs: Entrenador=72, Club=216, Explorar=360, Retos=504, Resultados=648
+    CLUB_X, CLUB_Y = 216, 1320
+    log.info(f"  tap Club ({CLUB_X},{CLUB_Y})")
+    tap_adb(serial, CLUB_X, CLUB_Y)
+    time.sleep(4)
+
+    try:
+        xml1 = safe_dump(device)
+        visible1 = xml_visible_strings(xml1)
+        log.info(f"  After Club tap, visible: {visible1[:15]}")
+        save_hierarchy(device, "after_club_hierarchy")
+    except Exception as exc:
+        log.warning(f"  Could not dump after Club tap: {exc}")
+        xml1 = ""
+
+    # Paso 2: dentro de Club, tocar "Reserva una clase"
     for txt in ("Reserva una clase", "Book a class", "RESERVA UNA CLASE"):
         try:
             el = device(textContains=txt)
             if el.exists:
                 tap_by_bounds(serial, el)
-                log.info(f"  Tapped '{txt}' button")
+                log.info(f"  Tapped '{txt}'")
                 time.sleep(4)
-                # Verificar que llegamos a Colectivas
-                xml_check = safe_dump(device)
-                visible_check = xml_visible_strings(xml_check)
-                log.info(f"  After '{txt}' tap, visible: {visible_check[:15]}")
+                xml2 = safe_dump(device)
+                visible2 = xml_visible_strings(xml2)
+                log.info(f"  After '{txt}' tap, visible: {visible2[:15]}")
                 screenshot(device, serial, "after_navigate_colectivas")
+                save_hierarchy(device, "after_navigate_hierarchy")
                 log.info("  Navigation completed")
                 return True
         except Exception as exc:
             log.warning(f"  Tap '{txt}' failed: {exc}")
 
-    # 2. Fallback: tocar el tab COLECTIVAS en la barra inferior
-    # Pantalla Geelark 720x1440 — tab COLECTIVAS es el 2º tab, x≈216, y≈1320
-    COLECTIVAS_X, COLECTIVAS_Y = 216, 1320
-    log.info(f"  Fallback: tap COLECTIVAS tab ({COLECTIVAS_X},{COLECTIVAS_Y})")
+    log.warning("  'Reserva una clase' not found in Club — dumping for diagnosis")
     try:
-        tap_adb(serial, COLECTIVAS_X, COLECTIVAS_Y)
-    except Exception as exc:
-        log.warning(f"  COLECTIVAS tab tap failed: {exc}")
-    time.sleep(4)
-
-    try:
-        xml2 = safe_dump(device)
-        visible2 = xml_visible_strings(xml2)
-        log.info(f"  After COLECTIVAS tab tap, visible: {visible2[:15]}")
-        screenshot(device, serial, "after_navigate_colectivas")
         save_hierarchy(device, "after_navigate_hierarchy")
+        screenshot(device, serial, "after_navigate_colectivas")
     except Exception:
         pass
-
-    log.info("  Navigation completed")
+    log.info("  Navigation completed (without confirmed Colectivas)")
     return True
 
 
