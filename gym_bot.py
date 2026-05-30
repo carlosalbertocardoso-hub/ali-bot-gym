@@ -634,13 +634,29 @@ def login(device, serial: str) -> bool:
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
 
+    # Marcadores reales de la pantalla Colectivas (ver capturas):
+    #   pestañas superiores "Colectivas" / "Club"
+    #   filtros "Hora de inicio" / "Entrenador"
+    #   selector de dias LUN..DOM
+    # NOTA: "SPORTS CENTER" / "CIRCULO MERCANTIL" es solo la cabecera del club,
+    # nunca se usa como indicador ni como target de navegacion.
+    DAY_ABBR = ("lun", "mar", "mié", "mie", "jue", "vie", "sáb", "sab", "dom")
+
     def is_colectivas_screen(xml: str) -> bool:
         lowered = xml.lower()
-        return (
-            "hora de inicio" in lowered or
-            "colectivas" in lowered or
-            "reserva una clase" in lowered
-        )
+        # "Reserva una clase" es la card del HOME, no la lista de clases:
+        # NO sirve para confirmar que ya estamos en Colectivas.
+        # Confirmamos con marcadores que SOLO existen en la lista de clases:
+        #   - filtro "Hora de inicio"
+        #   - pestaña hermana "Club" (solo aparece junto a Colectivas)
+        #   - selector de dias con >=3 abreviaturas visibles
+        if "hora de inicio" in lowered:
+            return True
+        if "colectivas" in lowered and "club" in lowered:
+            return True
+        if sum(1 for d in DAY_ABBR if d in lowered) >= 3:
+            return True
+        return False
 
     def dump_stage(stage: str) -> str:
         try:
@@ -661,13 +677,37 @@ def navigate_to_colectivas(device, serial: str) -> bool:
             return ""
 
     def is_colectivas_visual(stage: str) -> bool:
+        # 1) XML primero: es mucho mas fiable que el OCR para esta pantalla.
+        #    El OCR de las tarjetas grises suele salir corrupto, asi que no se
+        #    debe abortar la navegacion solo porque el OCR no lea SEGUIR.
+        try:
+            xml = safe_dump(device)
+            if is_colectivas_screen(xml):
+                log.info("  Navigation confirmed by XML (Colectivas screen)")
+                return True
+        except Exception as exc:
+            log.warning(f"  XML confirm failed: {exc}")
+
+        # 2) OCR como respaldo. Aceptamos marcadores estables de la pantalla
+        #    de clases: pestañas, filtros y dias. Nunca la cabecera del club.
         safe_stage = re.sub(r"[^A-Za-z0-9_]+", "_", stage).strip("_").lower()
         words = ocr_screen_words(device, serial, f"ocr_nav_{safe_stage}")
         joined = "".join(compact_norm(word["text"]) for word in words)
-        markers = ("COLECTIVAS", "HORADEINICIO", "SEGUIR", "RESERVAR")
+        # Solo marcadores que existen UNICAMENTE en la lista de clases.
+        # No incluir COLECTIVAS ni ENTRENADOR sueltos: ambos aparecen tambien
+        # en el bottom-nav del home y darian falso positivo.
+        markers = (
+            "HORADEINICIO", "SEGUIR", "RESERVAR", "RESERVADA", "CANCELAR",
+        )
         matched = next((marker for marker in markers if marker in joined), None)
         if matched:
             log.info(f"  Navigation confirmed by OCR marker: {matched}")
+            return True
+        # Selector de dias: si el OCR lee >=3 abreviaturas, estamos en la lista.
+        day_tokens = ("LUN", "MAR", "MIE", "JUE", "VIE", "SAB", "DOM")
+        day_hits = sum(1 for d in day_tokens if d in joined)
+        if day_hits >= 3:
+            log.info(f"  Navigation confirmed by OCR day selector ({day_hits} days)")
             return True
         return False
 
