@@ -1499,27 +1499,14 @@ def main():
         time.sleep(2)
 
         # 4. Arrancar app
-        # No hacer app_stop: el cloud phone de Geelark ya tiene Technogym
-        # abierta con la sesion de Alicia. Reiniciarla provoca que aparezca
-        # una pantalla de seleccion de club que no aparece en uso normal.
-        # Solo traemos la app al frente si no esta en primer plano.
-        try:
-            current = device.app_current()
-            if current.get("package") != APP_PACKAGE:
-                log.info(f"App not in foreground ({current.get('package')}), launching...")
-                device.app_start(APP_PACKAGE)
-                log.info("App started — waiting 15s...")
-                time.sleep(15)
-            else:
-                log.info("Technogym already in foreground — using as-is")
-                time.sleep(2)
-        except Exception as exc:
-            log.warning(f"Could not check current app ({exc}), launching fresh...")
-            device.app_stop(APP_PACKAGE)
-            time.sleep(3)
-            device.app_start(APP_PACKAGE)
-            log.info("App started — waiting 15s...")
-            time.sleep(15)
+        # NUNCA hacer app_stop: matar la app en Geelark provoca que al
+        # relanzarla muestre una pantalla de seleccion de club que no
+        # aparece en uso normal. app_start sin stop trae la app al frente
+        # si ya estaba abierta, o la lanza desde el estado guardado si no.
+        log.info("Launching Technogym (no stop)...")
+        device.app_start(APP_PACKAGE)
+        log.info("App launched — waiting 15s...")
+        time.sleep(15)
 
         # 5. Login
         if not login(device, serial):
