@@ -1023,6 +1023,10 @@ def visual_follow_fallback(device, serial: str, nombre: str, hora: str):
 
 
 def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
+    result = find_and_tap_by_ocr(device, serial, nombre, hora)
+    if result:
+        return result
+
     try:
         xml = safe_dump(device)
     except Exception as exc:
@@ -1046,8 +1050,7 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
 
     if card_line is None:
         log.info(f"  No card found for {nombre} @ {hora}")
-        return find_and_tap_by_ocr(device, serial, nombre, hora) or \
-               visual_follow_fallback(device, serial, nombre, hora)
+        return visual_follow_fallback(device, serial, nombre, hora)
 
     start = max(0, card_line - 50)
     end   = min(len(lines), card_line + 50)
