@@ -168,13 +168,20 @@ class GeelarkClient:
         time.sleep(5)  # async op — esperar antes de pedir datos
 
     def get_adb_info(self, phone_id: str) -> dict:
-        """Devuelve {'ip': ..., 'port': ..., 'password': ...}."""
+        """Devuelve dict con ip, port, pwd (contraseña ADB de Geelark)."""
         data = self.post("/open/v1/adb/getData", {"ids": [phone_id]})
-        d = data.get("data", {})
-        items = d.get("items") or d.get("list") or (d if isinstance(d, list) else [])
-        if not items:
-            raise RuntimeError(f"No ADB info returned for phone {phone_id}: {data}")
-        return items[0]
+        log.info(f"ADB raw response: {data}")
+        # La API devuelve la info directamente en data, o en data.items
+        d = data.get("data", data)
+        if isinstance(d, list):
+            return d[0]
+        items = d.get("items") or d.get("list")
+        if items:
+            return items[0]
+        # Estructura plana: {'ip': ..., 'port': ..., 'pwd': ...}
+        if d.get("ip"):
+            return d
+        raise RuntimeError(f"No ADB info returned for phone {phone_id}: {data}")
 
 
 # ============================================================
@@ -884,10 +891,10 @@ def main():
 
         ip       = adb_info.get("ip") or adb_info.get("host")
         port     = int(adb_info.get("port", 0))
-        password = adb_info.get("password") or adb_info.get("code", "")
+        password = adb_info.get("pwd") or adb_info.get("password") or adb_info.get("code", "")
 
         serial = connect_adb(ip, port, password)
-        wait_adb_ready(serial, timeout=60)
+        wait_adb_ready(serial, timeout=120)
 
         # 3. Iniciar uiautomator2
         log.info("Initialising uiautomator2 on cloud phone...")
