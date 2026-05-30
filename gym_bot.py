@@ -851,14 +851,18 @@ def time_variants(hora: str):
 
 
 def visual_follow_fallback(device, serial: str, nombre: str, hora: str):
+    # Last resort for the one-off OMNIA follow test when the list text is not
+    # exposed in the uiautomator hierarchy. Do not use this as generic booking
+    # logic because button Y positions vary by time slot and scroll position.
+    if not os.environ.get("FORCE_CLASS"):
+        return None
+
     if normalize_text(nombre) != "OMNIA":
         return None
 
     normalized_hours = set(time_variants(hora))
     if "9:30" in normalized_hours or "09:30" in normalized_hours:
         y_ratio = 0.575
-    elif "11:00" in normalized_hours:
-        y_ratio = 0.742
     else:
         return None
 
