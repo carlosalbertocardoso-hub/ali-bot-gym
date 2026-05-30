@@ -161,6 +161,23 @@ class GeelarkClient:
             time.sleep(5)
         raise TimeoutError(f"Phone {phone_id} did not reach running status in {timeout}s")
 
+    def ensure_phone_running(self, phone_id: str, attempts: int = 2, timeout: int = 240):
+        for attempt in range(1, attempts + 1):
+            log.info(f"Geelark start attempt {attempt}/{attempts}")
+            self.start_phone(phone_id)
+            try:
+                self.wait_phone_running(phone_id, timeout=timeout)
+                return
+            except TimeoutError:
+                if attempt == attempts:
+                    raise
+                log.warning("Phone stuck while starting; stopping and retrying")
+                try:
+                    self.stop_phone(phone_id)
+                    time.sleep(20)
+                except Exception as exc:
+                    log.warning(f"Could not stop stuck phone before retry: {exc}")
+
     # ── ADB ──────────────────────────────────────────────────
 
     def enable_adb(self, phone_id: str):
@@ -1416,8 +1433,7 @@ def main():
             phone_id = gl.first_phone_id()
 
         # 2. Arrancar el cloud phone
-        gl.start_phone(phone_id)
-        gl.wait_phone_running(phone_id, timeout=180)
+        gl.ensure_phone_running(phone_id, attempts=2, timeout=240)
 
         # 3. Habilitar ADB y obtener conexión
         gl.enable_adb(phone_id)
