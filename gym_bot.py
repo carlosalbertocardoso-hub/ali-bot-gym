@@ -587,20 +587,39 @@ def login(device, serial: str) -> bool:
 
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
-    # Galaxy Note20: 1080x2400, bottom nav ~2310px (antes era 1860 para Pixel 2 1080x1920)
-    COLECTIVAS_X, COLECTIVAS_Y = 324, 2310
-    log.info(f"  tap COLECTIVAS ({COLECTIVAS_X},{COLECTIVAS_Y})")
+    # Galaxy Note20 1080x2400 — bottom nav y≈2320
+    # Tabs: Entrenador(72), Club(216), Explorar(360), Retos(504), Resultados(648)
+    # Primero ir a Club para encontrar Colectivas desde ahí
+    CLUB_X, CLUB_Y = 216, 2320
+    # Tap en Club
+    log.info(f"  tap Club ({CLUB_X},{CLUB_Y})")
     try:
-        tap_adb(serial, COLECTIVAS_X, COLECTIVAS_Y)
+        tap_adb(serial, CLUB_X, CLUB_Y)
     except Exception as exc:
-        log.warning(f"  COLECTIVAS tap failed: {exc}")
-    time.sleep(1.5)
-    try:
-        tap_adb(serial, COLECTIVAS_X, COLECTIVAS_Y)
-    except Exception:
-        pass
+        log.warning(f"  Club tap failed: {exc}")
     time.sleep(3)
-    log.info("  COLECTIVAS tap completed")
+
+    # Desde Club, buscar "Reserva una clase" o "COLECTIVAS" y pulsar
+    try:
+        xml = safe_dump(device)
+        if "colectivas" in xml.lower():
+            el = device(textContains="COLECTIVAS") or device(textContains="Colectivas")
+            if el.exists:
+                tap_by_bounds(serial, el)
+                log.info("  Tapped COLECTIVAS from Club")
+                time.sleep(3)
+        elif "reserva una clase" in xml.lower() or "book a class" in xml.lower():
+            for txt in ("Reserva una clase", "Book a class", "RESERVA UNA CLASE"):
+                el = device(textContains=txt)
+                if el.exists:
+                    tap_by_bounds(serial, el)
+                    log.info(f"  Tapped '{txt}' from Club")
+                    time.sleep(3)
+                    break
+    except Exception as exc:
+        log.warning(f"  COLECTIVAS navigation from Club failed: {exc}")
+
+    log.info("  Navigation completed")
     return True
 
 
