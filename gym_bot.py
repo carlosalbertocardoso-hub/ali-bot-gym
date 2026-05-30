@@ -654,12 +654,50 @@ def navigate_to_colectivas(device, serial: str) -> bool:
             return True
         return False
 
-    xml0 = dump_stage("Initial screen")
-    if is_colectivas_screen(xml0):
+    def tap_nav_text_by_ocr(stage: str, targets, y_min: float = 0.0, y_max: float = 1.0) -> bool:
+        safe_stage = re.sub(r"[^A-Za-z0-9_]+", "_", stage).strip("_").lower()
+        words = ocr_screen_words(device, serial, f"ocr_nav_tap_{safe_stage}")
+        if not words:
+            return False
+        try:
+            _, height = device.window_size()
+        except Exception:
+            height = 9999
+
+        lines = ocr_lines(words)
+        target_norms = [compact_norm(target) for target in targets]
+        candidates = []
+        for line in lines:
+            if not (height * y_min <= line["cy"] <= height * y_max):
+                continue
+            line_norm = compact_norm(line["text"])
+            matched = next((target for target in target_norms if target and target in line_norm), None)
+            if matched:
+                candidates.append((line, matched))
+
+        if not candidates:
+            log.info(f"  OCR nav tap found no target for {targets} in {stage}")
+            return False
+
+        line, matched = candidates[0]
+        log.info(f"  OCR nav tapping {matched} at ({line['cx']},{line['cy']}) from '{line['text']}'")
+        tap_adb(serial, line["cx"], line["cy"])
+        time.sleep(5)
+        return True
+
+    if is_colectivas_visual("initial screen"):
         log.info("  Already on Colectivas")
         return True
 
     def try_booking_entry(stage: str) -> bool:
+        if tap_nav_text_by_ocr(stage, ("Reserva una clase", "Reservar cita", "Book a class"), y_min=0.45, y_max=0.82):
+            xml = dump_stage(f"After OCR booking-entry tap from {stage}")
+            screenshot(device, serial, "after_navigate_colectivas")
+            save_hierarchy(device, "after_navigate_hierarchy")
+            if is_colectivas_screen(xml) or is_colectivas_visual(f"After OCR booking-entry tap from {stage}"):
+                log.info("  Navigation completed")
+                return True
+
         for txt in ("Reserva una clase", "Reservar cita", "Book a class", "RESERVA UNA CLASE"):
             try:
                 el = device(textContains=txt)
@@ -706,6 +744,16 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         return True
 
     # Fallback: pestana inferior COLECTIVAS.
+    if tap_nav_text_by_ocr("bottom nav", ("COLECTIVAS",), y_min=0.82, y_max=1.0):
+        xml2 = dump_stage("After OCR COLECTIVAS tab")
+        screenshot(device, serial, "after_navigate_colectivas")
+        save_hierarchy(device, "after_navigate_hierarchy")
+        if is_colectivas_screen(xml2) or is_colectivas_visual("After OCR COLECTIVAS tab"):
+            log.info("  Navigation completed")
+            return True
+        if try_booking_entry("OCR COLECTIVAS tab"):
+            return True
+
     for txt in ("COLECTIVAS", "Colectivas"):
         try:
             el = device(textContains=txt)
