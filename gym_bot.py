@@ -587,10 +587,10 @@ def login(device, serial: str) -> bool:
 
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
-    # Galaxy Note20 1080x2400 — bottom nav y≈2320
-    # Tabs: Entrenador(72), Club(216), Explorar(360), Retos(504), Resultados(648)
-    # Primero ir a Club para encontrar Colectivas desde ahí
-    CLUB_X, CLUB_Y = 216, 2320
+    # Pantalla Geelark 720x1440 (escala 2/3 del Note20)
+    # Bottom nav visible en y≈1320, 5 tabs equiespaciados en ancho 720
+    # Entrenador=72, Club=216, Explorar=360, Retos=504, Resultados=648
+    CLUB_X, CLUB_Y = 216, 1320
     # Tap en Club
     log.info(f"  tap Club ({CLUB_X},{CLUB_Y})")
     try:
