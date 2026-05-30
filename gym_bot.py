@@ -587,37 +587,53 @@ def login(device, serial: str) -> bool:
 
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
-    # Pantalla Geelark 720x1440 (escala 2/3 del Note20)
-    # Bottom nav visible en y≈1320, 5 tabs equiespaciados en ancho 720
-    # Entrenador=72, Club=216, Explorar=360, Retos=504, Resultados=648
-    CLUB_X, CLUB_Y = 216, 1320
-    # Tap en Club
-    log.info(f"  tap Club ({CLUB_X},{CLUB_Y})")
-    try:
-        tap_adb(serial, CLUB_X, CLUB_Y)
-    except Exception as exc:
-        log.warning(f"  Club tap failed: {exc}")
-    time.sleep(3)
 
-    # Desde Club, buscar "Reserva una clase" o "COLECTIVAS" y pulsar
+    # Loguear pantalla inicial para diagnóstico
     try:
-        xml = safe_dump(device)
-        if "colectivas" in xml.lower():
-            el = device(textContains="COLECTIVAS") or device(textContains="Colectivas")
+        xml0 = safe_dump(device)
+        visible0 = xml_visible_strings(xml0)
+        log.info(f"  Initial screen visible: {visible0[:15]}")
+        save_hierarchy(device, "before_navigate_hierarchy")
+    except Exception as exc:
+        log.warning(f"  Could not dump initial screen: {exc}")
+        xml0 = ""
+
+    # 1. Intentar tocar "Reserva una clase" directamente (está en la tab Entrenador/home)
+    for txt in ("Reserva una clase", "Book a class", "RESERVA UNA CLASE"):
+        try:
+            el = device(textContains=txt)
             if el.exists:
                 tap_by_bounds(serial, el)
-                log.info("  Tapped COLECTIVAS from Club")
-                time.sleep(3)
-        elif "reserva una clase" in xml.lower() or "book a class" in xml.lower():
-            for txt in ("Reserva una clase", "Book a class", "RESERVA UNA CLASE"):
-                el = device(textContains=txt)
-                if el.exists:
-                    tap_by_bounds(serial, el)
-                    log.info(f"  Tapped '{txt}' from Club")
-                    time.sleep(3)
-                    break
+                log.info(f"  Tapped '{txt}' button")
+                time.sleep(4)
+                # Verificar que llegamos a Colectivas
+                xml_check = safe_dump(device)
+                visible_check = xml_visible_strings(xml_check)
+                log.info(f"  After '{txt}' tap, visible: {visible_check[:15]}")
+                screenshot(device, serial, "after_navigate_colectivas")
+                log.info("  Navigation completed")
+                return True
+        except Exception as exc:
+            log.warning(f"  Tap '{txt}' failed: {exc}")
+
+    # 2. Fallback: tocar el tab COLECTIVAS en la barra inferior
+    # Pantalla Geelark 720x1440 — tab COLECTIVAS es el 2º tab, x≈216, y≈1320
+    COLECTIVAS_X, COLECTIVAS_Y = 216, 1320
+    log.info(f"  Fallback: tap COLECTIVAS tab ({COLECTIVAS_X},{COLECTIVAS_Y})")
+    try:
+        tap_adb(serial, COLECTIVAS_X, COLECTIVAS_Y)
     except Exception as exc:
-        log.warning(f"  COLECTIVAS navigation from Club failed: {exc}")
+        log.warning(f"  COLECTIVAS tab tap failed: {exc}")
+    time.sleep(4)
+
+    try:
+        xml2 = safe_dump(device)
+        visible2 = xml_visible_strings(xml2)
+        log.info(f"  After COLECTIVAS tab tap, visible: {visible2[:15]}")
+        screenshot(device, serial, "after_navigate_colectivas")
+        save_hierarchy(device, "after_navigate_hierarchy")
+    except Exception:
+        pass
 
     log.info("  Navigation completed")
     return True
@@ -800,11 +816,18 @@ def confirm_booking(device) -> bool:
 
 
 def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
-    nombre = clase["nombre"]
-    hora   = clase["hora"]
+    nombre   = clase["nombre"]
+    hora     = clase["hora"]
+    dia_clase = clase.get("dia_clase", datetime.now().weekday())
     log.info(f"--- BOOK: {nombre} {hora} ---")
     screenshot(device, serial, "colectivas_before_book")
     save_hierarchy(device, "colectivas_hierarchy")
+
+    # Select the correct day tab before starting the booking loop
+    select_day(device, serial, dia_clase)
+    time.sleep(2)
+    screenshot(device, serial, "after_day_select")
+    save_hierarchy(device, "after_day_select_hierarchy")
 
     deadline = time.time() + 180
     attempt  = 0
