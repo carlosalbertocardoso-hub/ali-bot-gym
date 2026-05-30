@@ -1115,26 +1115,45 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
     return None
 
 
-def verify_followed(device, serial: str) -> bool:
+def verify_action_result(device, serial: str, result: str) -> bool:
+    markers = {
+        "followed": ["DEJARDESEGUIR"],
+        "booked": ["CANCELAR", "CANCEL", "RESERVADA", "BOOKED"],
+        "waitlist": ["CANCELAR", "CANCEL", "LISTADEESPERA", "WAITLIST", "ENLISTA"],
+    }.get(result, [])
+    if not markers:
+        log.warning(f"  No verification markers configured for result: {result}")
+        return False
+
+    label = {
+        "followed": "SEGUIR",
+        "booked": "RESERVAR",
+        "waitlist": "LISTA DE ESPERA",
+    }.get(result, result)
+
     for attempt in range(1, 4):
         try:
             xml = safe_dump(device)
         except Exception:
             xml = ""
-        if "DEJARDESEGUIR" in compact_norm(xml):
-            log.info(f"  SEGUIR verified by XML: 'DEJAR DE SEGUIR' visible (attempt {attempt})")
+        xml_norm = compact_norm(xml)
+        matched = next((marker for marker in markers if marker in xml_norm), None)
+        if matched:
+            log.info(f"  {label} verified by XML: {matched} visible (attempt {attempt})")
             return True
 
-        words = ocr_screen_words(device, serial, f"ocr_follow_verify_{attempt}")
-        if "DEJARDESEGUIR" in "".join(compact_norm(w["text"]) for w in words):
-            log.info(f"  SEGUIR verified by OCR: 'DEJAR DE SEGUIR' visible (attempt {attempt})")
+        words = ocr_screen_words(device, serial, f"ocr_verify_{result}_{attempt}")
+        ocr_norm = "".join(compact_norm(w["text"]) for w in words)
+        matched = next((marker for marker in markers if marker in ocr_norm), None)
+        if matched:
+            log.info(f"  {label} verified by OCR: {matched} visible (attempt {attempt})")
             return True
 
         time.sleep(2)
 
-    log.warning("  SEGUIR tap not verified: 'DEJAR DE SEGUIR' not found")
-    screenshot(device, serial, "follow_not_verified")
-    save_hierarchy(device, "follow_not_verified")
+    log.warning(f"  {label} not verified; success will not be reported")
+    screenshot(device, serial, f"{result}_not_verified")
+    save_hierarchy(device, f"{result}_not_verified")
     return False
 
 
@@ -1223,14 +1242,13 @@ def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
         if result in ('booked', 'waitlist', 'followed'):
             time.sleep(3)
             screenshot(device, serial, f"after_{result}_tap")
-            if result == 'followed':
-                if not verify_followed(device, serial):
-                    return False
-            else:
+            if result != 'followed':
                 select_station(device, serial)
                 time.sleep(2)
                 confirm_booking(device)
                 time.sleep(2)
+            if not verify_action_result(device, serial, result):
+                return False
             screenshot(device, serial, result)
             result_label = {
                 'booked': 'RESERVED',
