@@ -980,7 +980,48 @@ def select_day(device, serial: str, dia_clase: int) -> bool:
             except Exception:
                 pass
 
-    log.warning(f"  Day not found: weekday {dia_clase}")
+    # Fallback OCR: buscar el numero del dia en la franja del selector.
+    # El XML de uiautomator no siempre expone los nodos del selector de dias.
+    log.info(f"  XML day search failed, trying OCR for day {day_num}...")
+    try:
+        words = ocr_screen_words(device, serial, f"ocr_day_{day_num}")
+        width, height = device.window_size()
+        # El selector de dias ocupa aprox y=22%-42% de la pantalla.
+        y_min = int(height * 0.22)
+        y_max = int(height * 0.42)
+        day_labels_norm = {normalize_text(l) for l in DAY_LABELS[dia_clase]}
+        # Buscar el numero exacto en la franja del selector.
+        number_words = [
+            w for w in words
+            if w["text"].strip() == day_num
+            and y_min <= w["bounds"][1] <= y_max
+        ]
+        if number_words:
+            w = number_words[0]
+            cx = (w["bounds"][0] + w["bounds"][2]) // 2
+            cy = (w["bounds"][1] + w["bounds"][3]) // 2
+            log.info(f"  OCR: tapping day {day_num} at ({cx},{cy})")
+            tap_adb(serial, cx, cy)
+            time.sleep(2)
+            return True
+        # Buscar por abreviatura del dia si el numero no aparece.
+        label_words = [
+            w for w in words
+            if normalize_text(w["text"]) in day_labels_norm
+            and y_min <= w["bounds"][1] <= y_max
+        ]
+        if label_words:
+            w = label_words[0]
+            cx = (w["bounds"][0] + w["bounds"][2]) // 2
+            cy = (w["bounds"][1] + w["bounds"][3]) // 2
+            log.info(f"  OCR: tapping day label {w['text']} at ({cx},{cy})")
+            tap_adb(serial, cx, cy)
+            time.sleep(2)
+            return True
+    except Exception as exc:
+        log.warning(f"  OCR day search failed: {exc}")
+
+    log.warning(f"  Day not found: weekday {dia_clase} (date {day_num})")
     return False
 
 
