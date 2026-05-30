@@ -840,6 +840,39 @@ def select_day(device, serial: str, dia_clase: int) -> bool:
     return False
 
 
+def time_variants(hora: str):
+    variants = {hora}
+    m = re.match(r"^0?(\d{1,2}):(\d{2})$", hora.strip())
+    if m:
+        hour, minute = int(m.group(1)), m.group(2)
+        variants.add(f"{hour}:{minute}")
+        variants.add(f"{hour:02d}:{minute}")
+    return sorted(variants, key=len)
+
+
+def visual_follow_fallback(device, serial: str, nombre: str, hora: str):
+    if normalize_text(nombre) != "OMNIA":
+        return None
+
+    normalized_hours = set(time_variants(hora))
+    if "9:30" in normalized_hours or "09:30" in normalized_hours:
+        y_ratio = 0.575
+    elif "11:00" in normalized_hours:
+        y_ratio = 0.742
+    else:
+        return None
+
+    try:
+        width, height = device.window_size()
+        x, y = int(width * 0.82), int(height * y_ratio)
+        log.info(f"  Visual fallback tap SEGUIR for {nombre} {hora} at ({x},{y})")
+        tap_adb(serial, x, y)
+        return "followed"
+    except Exception as exc:
+        log.warning(f"  Visual fallback SEGUIR failed: {exc}")
+        return None
+
+
 def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
     try:
         xml = safe_dump(device)
@@ -847,10 +880,11 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
         log.warning(f"  dump_hierarchy failed: {exc}")
         return None
 
-    lines     = xml.split('\n')
-    hora_idx  = [i for i, l in enumerate(lines) if hora in l]
+    lines      = xml.split('\n')
+    horas      = time_variants(hora)
+    hora_idx   = [i for i, l in enumerate(lines) if any(h in l for h in horas)]
     nombre_idx = [i for i, l in enumerate(lines) if nombre.upper() in l.upper()]
-    log.info(f"  '{hora}' at lines {hora_idx[:5]}, '{nombre}' at lines {nombre_idx[:5]}")
+    log.info(f"  '{hora}' variants {horas} at lines {hora_idx[:5]}, '{nombre}' at lines {nombre_idx[:5]}")
 
     card_line = None
     for hi in hora_idx:
@@ -863,7 +897,7 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
 
     if card_line is None:
         log.info(f"  No card found for {nombre} @ {hora}")
-        return None
+        return visual_follow_fallback(device, serial, nombre, hora)
 
     start = max(0, card_line - 50)
     end   = min(len(lines), card_line + 50)
