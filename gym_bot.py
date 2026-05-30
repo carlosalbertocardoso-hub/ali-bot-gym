@@ -511,7 +511,7 @@ def login(device, serial: str) -> bool:
             continue
 
         if xml_contains_any(xml, HOME_INDICATORS):
-            log.info("Already at club home — skipping login")
+            log.info("Already at app home — skipping login")
             return True
 
         if "onboarding.alreadySignedin.button" in xml.lower() or \
@@ -583,7 +583,7 @@ def login(device, serial: str) -> bool:
         log.info(f"  Post-login {i+1}/40: {visible[:12]}")
 
         if xml_contains_any(xml, HOME_INDICATORS):
-            log.info("Club home reached")
+            log.info("App home reached")
             screenshot(device, serial, "home_reached")
             return True
 
@@ -592,7 +592,7 @@ def login(device, serial: str) -> bool:
 
         if xml_contains_any(xml, AUTHENTICATED_INDICATORS) and \
            not xml_contains_any(xml, LOGIN_FORM_INDICATORS):
-            log.info("Authenticated home (club home not yet visible)")
+            log.info("Authenticated home (main home not yet visible)")
             return True
 
         if i == 20 and "contentloading" in xml.lower():
@@ -621,7 +621,8 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         lowered = xml.lower()
         return (
             "hora de inicio" in lowered or
-            ("colectivas" in lowered and "entrenador" in lowered and "club" in lowered)
+            "colectivas" in lowered or
+            "reserva una clase" in lowered
         )
 
     def dump_stage(stage: str) -> str:
@@ -676,9 +677,8 @@ def navigate_to_colectivas(device, serial: str) -> bool:
     if try_booking_entry("initial screen"):
         return True
 
-    # Fallback: pestana inferior. En la app se ve como COLECTIVAS, pero el
-    # arbol de accesibilidad de esta build la expone como Club.
-    for txt in ("COLECTIVAS", "Colectivas", "Club"):
+    # Fallback: pestana inferior COLECTIVAS.
+    for txt in ("COLECTIVAS", "Colectivas"):
         try:
             el = device(textContains=txt)
             if el.exists:
@@ -696,14 +696,14 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         except Exception as exc:
             log.warning(f"  Tap bottom tab '{txt}' failed: {exc}")
 
-    # Ultimo fallback por coordenadas relativas: la pestana Colectivas/Club es la segunda del bottom nav.
+    # Ultimo fallback por coordenadas relativas: COLECTIVAS es la segunda pestana del bottom nav.
     try:
         width, height = device.window_size()
         x, y = int(width * 0.30), int(height * 0.94)
-        log.info(f"  Coordinate fallback tap Colectivas/Club ({x},{y})")
+        log.info(f"  Coordinate fallback tap Colectivas ({x},{y})")
         tap_adb(serial, x, y)
         time.sleep(5)
-        xml3 = dump_stage("After coordinate Colectivas/Club tap")
+        xml3 = dump_stage("After coordinate Colectivas tap")
         save_hierarchy(device, "after_navigate_hierarchy")
         screenshot(device, serial, "after_navigate_colectivas")
         if is_colectivas_screen(xml3):
@@ -714,8 +714,8 @@ def navigate_to_colectivas(device, serial: str) -> bool:
     except Exception as exc:
         log.warning(f"  Coordinate fallback failed: {exc}")
 
-    # En algunos estados el Club carga una cabecera y hay que tocar la subpestana
-    # superior Colectivas antes de que aparezcan filtros y tarjetas.
+    # Si aparece una vista intermedia, tocar la subpestana superior Colectivas
+    # antes de buscar filtros y tarjetas.
     try:
         width, height = device.window_size()
         x, y = int(width * 0.24), int(height * 0.28)
