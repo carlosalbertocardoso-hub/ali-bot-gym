@@ -729,8 +729,6 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         if is_colectivas_screen(xml4):
             log.info("  Navigation completed")
             return True
-        log.info("  Continuing after Colectivas coordinate tap despite missing XML marker")
-        return True
     except Exception as exc:
         log.warning(f"  Top Colectivas subtab fallback failed: {exc}")
 
@@ -1034,20 +1032,14 @@ def visual_follow_fallback(device, serial: str, nombre: str, hora: str):
         return None
 
     normalized_hours = set(time_variants(hora))
-    if "9:30" in normalized_hours or "09:30" in normalized_hours:
-        y_ratio = 0.575
-    else:
+    if "9:30" not in normalized_hours and "09:30" not in normalized_hours:
         return None
 
-    try:
-        width, height = device.window_size()
-        x, y = int(width * 0.82), int(height * y_ratio)
-        log.info(f"  Visual fallback tap SEGUIR for {nombre} {hora} at ({x},{y})")
-        tap_adb(serial, x, y)
-        return "followed"
-    except Exception as exc:
-        log.warning(f"  Visual fallback SEGUIR failed: {exc}")
-        return None
+    log.info(
+        f"  Visual fallback available for {nombre} {hora}, "
+        "but not used because OCR/XML did not confirm the card"
+    )
+    return None
 
 
 def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
