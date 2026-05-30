@@ -1498,10 +1498,14 @@ def main():
         device.screen_on()
         time.sleep(2)
 
-        # 4. La app ya esta al frente en el cloud phone de Geelark.
-        # No tocar nada — solo encender pantalla y esperar un momento.
-        log.info("Technogym already running on cloud phone — screen on, wait 5s...")
-        time.sleep(5)
+        # 4. Abrir Technogym desde la pantalla principal de Android.
+        # El cloud phone tiene la app instalada y logueada — solo hay que
+        # abrirla. NUNCA app_stop antes: reinicia la app desde cero y
+        # muestra pantalla de seleccion de club en vez del home de Alicia.
+        log.info("Starting Technogym from home screen...")
+        device.app_start(APP_PACKAGE)
+        log.info("App started — waiting 15s...")
+        time.sleep(15)
 
         # 5. Login
         if not login(device, serial):
