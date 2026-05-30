@@ -2,439 +2,420 @@
 
 ## Objetivo
 
-Automatizar reservas de clases en la app Technogym para Alicia en el club Mercantil / Sports Center Mercantil.
+Automatizar la reserva o seguimiento de clases en la app Technogym para Alicia.
 
-Reservas deseadas:
+Reservas habituales configuradas en `gym_bot.py`:
 
-- Domingo 22:00 -> reservar Body Tono del lunes a las 18:00
-- Martes 22:00 -> reservar Body Tono del miercoles a las 18:00
-- Miercoles 22:00 -> reservar POWER del jueves a las 19:00
+- Domingo 22:00 -> BODYTONO del lunes a las 18:00
+- Martes 22:00 -> BODYTONO del miercoles a las 18:00
+- Miercoles 22:00 -> POWER del jueves a las 19:00
 
-Arquitectura actual (producción):
-
-```text
-GitHub Actions (cron schedule) -> run_bot.sh -> Android Emulator (CI) -> uiautomator2/ADB -> Technogym App
-```
-
-Arquitectura local (desarrollo):
+Pruebas manuales se lanzan con `FORCE_CLASS` / `force_class`, por ejemplo:
 
 ```text
-Windows Task Scheduler -> python gym_bot.py -> uiautomator2/ADB -> Android Emulator -> Technogym App
+OMNIA,09:30,6
 ```
 
-## Carpeta y archivos
+El tercer campo usa `datetime.weekday()` de Python:
 
-Proyecto:
-
-```powershell
-C:\Users\ccard\Proyectos\gym-bot-alicia
+```text
+0=lun, 1=mar, 2=mie, 3=jue, 4=vie, 5=sab, 6=dom
 ```
 
-Archivos importantes:
+## Arquitectura Actual
 
-- `gym_bot.py`: script principal con toda la lógica de automatización.
-- `run_bot.sh`: script de arranque para GitHub Actions (instala APK, init uiautomator2, lanza bot).
-- `.github/workflows/gym-bot.yml`: workflow de GitHub Actions con cron y `workflow_dispatch`.
-- `test_login.py`: test rápido del login.
-- `setup_tasks.ps1`: alta de tareas programadas en Windows.
-- `technogym.apk`: APK antiguo 2.9.1. NO tiene flujo moderno de reservas. No usar.
-- `technogym-3.43.2.xapk`: app moderna descargada.
-- `technogym-3.43.2-xapk\`: XAPK extraído con APK base y splits.
-- `screenshots\`: capturas del mapeo.
-- `platform-tools\adb.exe`: ADB local.
-- `jdk17\jdk-17.0.19+10`: JDK local para `sdkmanager` / `avdmanager`.
+Produccion actual:
 
-## Credenciales
+```text
+GitHub Actions -> Geelark cloud phone -> ADB remoto -> uiautomator2 -> Technogym app
+```
 
-Están en `gym_bot.py`:
+El flujo antiguo con Android Emulator / `run_bot.sh` queda como referencia historica. El camino activo es `gym_bot.py` usando Geelark.
+
+Archivos principales:
+
+- `gym_bot.py`: script principal.
+- `.github/workflows/gym-bot.yml`: cron, workflow manual y dependencias.
+- `screenshots/`: capturas generadas durante runs.
+- `gym_bot.log`: log del run.
+- `CAPTURE_LOCAL.md`: notas/capturas locales no necesariamente versionadas.
+
+## Credenciales y Config
+
+Credenciales de Technogym en `gym_bot.py`:
 
 ```python
 EMAIL = "aliciaramirezcaballero@gmail.com"
 PASSWORD = "gimnasio"
+APP_PACKAGE = "com.technogym.tgapp"
 ```
 
-## App Technogym
-
-Paquete:
+Credenciales Geelark por GitHub Secrets / env vars:
 
 ```text
-com.technogym.tgapp
-```
-
-Version moderna:
-
-- Technogym - fitness & workout
-- Version `3.43.2`
-- versionCode `3244`
-- Publicada alrededor del 21 mayo 2026
-- Fuente usada: APKPure / APKMirror
-
-Archivo local:
-
-```powershell
-.\technogym-3.43.2.xapk
-```
-
-Contenido extraído:
-
-```text
-technogym-3.43.2-xapk\com.technogym.tgapp.apk
-technogym-3.43.2-xapk\config.arm64_v8a.apk
-technogym-3.43.2-xapk\config.en.apk
-technogym-3.43.2-xapk\config.xxhdpi.apk
-technogym-3.43.2-xapk\config.zh.apk
-technogym-3.43.2-xapk\manifest.json
-```
-
-Instalación:
-
-```powershell
-.\platform-tools\adb.exe -s emulator-5554 install-multiple -r `
-  .\technogym-3.43.2-xapk\com.technogym.tgapp.apk `
-  .\technogym-3.43.2-xapk\config.en.apk `
-  .\technogym-3.43.2-xapk\config.xxhdpi.apk `
-  .\technogym-3.43.2-xapk\config.arm64_v8a.apk
-```
-
-## Emuladores
-
-### AVD malo / insuficiente
-
-`GymBotAVD30`
-
-- Android 11 / API 30
-- `system-images;android-30;google_apis;x86_64`
-- Problema: Play Services viejo (`201817023`). Technogym 3.43.2 se queda en splash.
-
-### AVD correcto
-
-`GymBotPlayAVD`
-
-- Android 14 / API 34
-- `system-images;android-34;google_apis_playstore;x86_64`
-- Play Services: `versionCode=231818047`, `versionName=23.18.18`.
-- Technogym 3.43.2 pasa del splash a la UI moderna.
-- Problema: en modo headless va lento y puede lanzar ANR de System UI / Pixel Launcher. Se usa 4 GB RAM en CI.
-
-Nota 2026-05-28: se probó `system-images;android-34;google_apis;x86_64` para evitar ANRs. El emulador arrancó más limpio, pero Technogym no expuso correctamente el onboarding/login: uiautomator solo veía el reloj y no aparecía el campo email. Se revirtió a `google_apis_playstore`, que sigue siendo el target correcto para esta app.
-
-`gym_bot.py` apunta a:
-
-```python
-AVD_NAME = "GymBotPlayAVD"
-DEVICE_SERIAL = "emulator-5554"
-```
-
-Arranque local para pruebas (con ventana visible):
-
-```powershell
-Start-Process -FilePath "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" `
-  -ArgumentList @(
-    '-avd','GymBotPlayAVD',
-    '-no-audio',
-    '-gpu','swiftshader_indirect',
-    '-memory','4096',
-    '-cores','4',
-    '-port','5554',
-    '-no-snapshot-load',
-    '-no-metrics'
-  )
-```
-
-No usar `-no-window` hasta que el bot esté estable.
-
-Comprobaciones:
-
-```powershell
-.\platform-tools\adb.exe devices -l
-.\platform-tools\adb.exe -s emulator-5554 shell getprop sys.boot_completed
-.\platform-tools\adb.exe -s emulator-5554 shell getprop ro.build.version.release
+GEELARK_APP_ID
+GEELARK_API_KEY
+GEELARK_PHONE_ID
 ```
 
 ## GitHub Actions
 
-### Workflow: `.github/workflows/gym-bot.yml`
-
-Cron schedules (UTC, = 21:40 Madrid hora de verano):
-
-- Domingo 19:40 UTC → reserva Body Tono lunes 18:00
-- Martes 19:40 UTC → reserva Body Tono miércoles 18:00
-- Miércoles 19:40 UTC → reserva POWER jueves 19:00
-
-El workflow también acepta `workflow_dispatch` con input `force_class`.
-
-### run_bot.sh
-
-Detecta serial del emulador dinámicamente (no hardcodeado), instala APK, inicia uiautomator2, lanza `gym_bot.py`:
-
-```bash
-SERIAL=$(adb devices | grep emulator | awk '{print $1}' | head -1)
-adb -s "$SERIAL" install-multiple -r technogym-3.43.2-xapk/...
-python -m uiautomator2 init -s "$SERIAL"
-DEVICE_SERIAL="$SERIAL" python gym_bot.py
-```
-
-### Git LFS
-
-Los binarios APK están en Git LFS. El workflow usa `actions/checkout@v4` con `lfs: true`.
-
-### Artefactos en caso de fallo
-
-- `screenshots/` + `login_failed_hierarchy.xml` → artifact `screenshots-{run_id}` (7 días)
-- `gym_bot.log` → artifact `gym-bot-log-{run_id}` (30 días)
-- Capturas útiles recientes:
-  - `blind_login_fallback_*.png`: antes de tocar LOG IN por coordenadas cuando uiautomator no ve la pantalla inicial.
-  - `login_form_not_found_*.png`: cuando se cree estar en formulario pero no aparece el campo email.
-  - `after_adb_type_*.png`: después de escribir texto por ADB, para confirmar foco/teclado.
-
-### Test manual
-
-Lanzar desde GitHub Actions > "Gym Bot Reserva" > "Run workflow" con el campo `force_class` relleno, por ejemplo:
-
-```
-CICLO,18:00,3
-```
-
-Formato: `NOMBRE,HH:MM,dia_weekday` donde `dia_weekday` es el weekday Python de la clase (0=lun, 1=mar, 2=mié, 3=jue, 4=vie, 5=sáb, 6=dom).
-
-Equivale a `FORCE_CLASS` env var en el bot. Salta la comprobación de hora y día.
-
-**IMPORTANTE**: El campo en el formulario GitHub Actions es el texto que aparece bajo "Forzar clase". Hay que teclearlo explícitamente — si se deja vacío, `FORCE_CLASS` llega vacía y el bot usa el modo cron normal.
-
-La variable `FORCE_CLASS` está declarada a nivel de **job** (no de step) para garantizar que el subproceso del emulador la hereda:
-
-```yaml
-jobs:
-  reserva:
-    env:
-      FORCE_CLASS: ${{ github.event.inputs.force_class }}
-```
-
-## Estado de gym_bot.py
-
-### Flujo completo implementado
-
-1. `ensure_emulator()` — arranca el AVD si no está online
-2. `u2.connect()` + retry loop (10×3s) — espera a que el servidor uiautomator2 esté listo para JSON-RPC
-3. `login(device)` — detecta pantalla inicial → pulsa LOG IN → rellena email/password → espera home del club
-4. `navigate_to_colectivas(device)` — va al tab COLECTIVAS; si no es visible, usa "Reserva una clase" como puerta de entrada
-5. `book_class_with_refresh(device, clase)` — espera hasta 3 min refrescando cada 5s, llama a `find_card_and_book`
-6. `find_card_and_book(device, nombre, hora)` — parsea XML, detecta RESERVAR / CANCELAR / ÚNETE, hace tap
-
-### Conexión uiautomator2 — retry loop
-
-Tras `u2.connect()`, el servidor HTTP en el emulador puede tardar varios segundos en aceptar peticiones JSON-RPC. El bot reintenta hasta 10 veces con 3s de pausa antes de abortar:
-
-```python
-device = u2.connect(DEVICE_SERIAL)
-for _attempt in range(10):
-    try:
-        info = device.info
-        log.info(f"Connected: {info.get('productName', '?')}")
-        break
-    except Exception:
-        log.info("Waiting for uiautomator2 server to be ready...")
-        time.sleep(3)
-else:
-    log.error("uiautomator2 server never became ready — aborting")
-    return
-```
-
-### Login — resource-ids mapeados
-
-- Pantalla inicial: `onboarding.alreadySignedIn.button` = botón LOG IN
-- Campo email: `loginPage.username.textfield`
-- Campo password: `loginPage.password.textfield`
-- Botón login: `loginPage.login.button`
-- Fallback ADB tap LOG IN: coordenadas `(540, 1710)` en 1080x1920
-- Si la pantalla inicial no está expuesta a uiautomator y solo se ve el reloj, `login()` prueba ese fallback en los intentos 5, 10 y 15.
-
-### Login — entrada de texto en Android 14
-
-No usar `device.send_keys(...)` para email/password en Android 14 / API 34.
-
-Fallo visto en CI el 28 mayo 2026:
+Workflow:
 
 ```text
-uiautomator2.exceptions.RPCUnknownError: java.lang.SecurityException:
-Package android does not belong to 2000
-uiautomator2.exceptions.InputIMEError: install AdbKeyboard ime failed
+.github/workflows/gym-bot.yml
 ```
 
-Causa: `uiautomator2.send_keys` intenta usar clipboard y, si falla, instalar/activar `AdbKeyboard`. En Android 14 el acceso al clipboard desde el proceso de uiautomator puede fallar con `SecurityException`.
-
-Solución actual en `gym_bot.py`:
-
-```python
-enter_text(device, field, text)
-```
-
-El helper no usa `device.send_keys`, clipboard ni `AdbKeyboard`. Tampoco depende ya de `field.set_text`.
-
-Secuencia actual:
-
-1. Espera a que no haya ANR (`wait_for_no_anr`).
-2. Trae Technogym al foreground con `monkey -p com.technogym.tgapp`.
-3. Enfoca y limpia el campo.
-4. Escribe con ADB:
-   - trozos alfanuméricos con `adb shell input text ...`
-   - `@` con `KEYCODE_AT`
-   - `.` con `KEYCODE_PERIOD`
-5. Vuelve a leer el campo si `verify=True`.
+El workflow instala:
 
 ```bash
-adb shell input text ...
+pip install uiautomator2 requests pytesseract
+sudo apt-get install -y adb tesseract-ocr
 ```
 
-El login llama a `enter_text(device, email_el, EMAIL)` y `enter_text(device, pw_el, PASSWORD)`.
+Motivo: el XML de uiautomator no siempre expone los textos reales de Technogym, asi que OCR es parte del flujo normal.
 
-Si el campo sigue vacío, mirar en los artifacts `after_adb_type_loginPage.username.textfield*.png`, `login_failed_hierarchy.xml` y `gym_bot.log` para saber si el problema es foco, overlay/ANR o que la pantalla real no es el formulario.
-
-### Post-login detection (bucle de 20 iteraciones)
-
-Después de pulsar login, el bot espera hasta 20×3s = ~60s para que aparezca la home del club.
-Indicadores reconocidos:
-
-```python
-HOME_INDICATORS = ["COLECTIVAS", "Colectivas", "Reserva una clase", "Tus citas",
-                   "Entrenador", "Explorar", "MOVERGY", "Tus planes"]
-```
-
-En cada iteración: descarta ANR, loguea los textos visibles, descarta diálogos (CONTINUE, SKIP, OK, Allow, etc.).
-Si falla tras 20 intentos: captura screenshot `login_failed` + guarda XML en `login_failed_hierarchy.xml`.
-
-PENDIENTE: Validar en CI con run manual. Los logs "Post-login iter X/20 texts: [...]" mostrarán qué ve el bot.
-
-### Weekday en Python vs cron
-
-El campo `dia_reserva`/`dia_clase` en `CLASES` y en `FORCE_CLASS` usa `datetime.weekday()`:
-- 0=lun, 1=mar, 2=mié, 3=jue, 4=vie, 5=sáb, 6=dom
-
-Diferente del cron de GitHub Actions donde 0=dom, 7=dom.
-
-### Navegación a COLECTIVAS
-
-```python
-def navigate_to_colectivas(device):
-    # 1. Intenta tab COLECTIVAS en bottom nav
-    # 2. Si no: pulsa "Reserva una clase" (botón en home, confirmado por screenshot del usuario)
-    #    y luego busca tab COLECTIVAS desde ahí
-```
-
-### Reserva con refresco
-
-```python
-def book_class_with_refresh(device, clase):
-    # Loop 3 min, pull-to-refresh + re-selección de día cada 5s
-    # Llama a find_card_and_book que parsea XML
-    # Maneja estados: 'booked', 'already', 'waitlist', 'full'
-```
-
-### Selección de día
-
-Calcula fecha exacta (dias_ahead desde hoy), busca etiqueta+número en XML (ej. "JUE 29"), fallback solo abreviatura. Maneja acentos: MIÉ/MIE, SÁB/SAB.
-
-### FORCE_CLASS
-
-Variable de entorno `FORCE_CLASS="NOMBRE,HH:MM,dia_weekday"` salta comprobación de hora/día.
-
-Ejemplo: `FORCE_CLASS=POWER,19:00,3` reserva POWER 19:00 el próximo jueves.
-
-En CI: si `FORCE_CLASS` no está presente y es el turno de cron, el bot espera en COLECTIVAS hasta las 22:00 Madrid (20:00 UTC) antes de intentar la reserva.
-
-## Pantallas de la app (mapeadas por usuario)
-
-Home del club:
-
-- Cabecera: `SPORTS CENTER ...`
-- Tarjeta `Tus citas`
-- Botón `Reserva una clase` (icono calendario + `+`) — **este es el botón correcto para entrar a reservas**
-- Bottom tabs: `Entrenador`, `COLECTIVAS`, `Explorar`, `Retos`, `Resultados`
-
-Pantalla COLECTIVAS:
-
-- Selector de días horizontal: `MIE 27`, `JUE 28`, `VIE 29`, etc.
-- Lista de tarjetas con nombre de clase, hora y botón de estado (RESERVAR / CANCELAR / ÚNETE)
-
-## Estado actual / pendientes
-
-Último commit conocido empujado antes de esta nota:
+`workflow_dispatch` acepta:
 
 ```text
-9b87d69 Restore Play Store emulator for Technogym login
+force_class = NOMBRE,HH:MM,dia_weekday
 ```
 
-Estado real a 2026-05-28:
+Ejemplos:
 
-1. **El target correcto vuelve a ser `google_apis_playstore`**: el ensayo con `google_apis` quitó parte de la inestabilidad, pero no mostró el onboarding/login de Technogym.
-2. **Login todavía pendiente de un CI verde**: el fallo inicial de `send_keys`/`AdbKeyboard` está mitigado con escritura ADB por chunks, pero los últimos runs fallaron antes de validar un login completo.
-3. **ANR mejor gestionado**: `dismiss_anr()` busca botones reales `Wait` / `Esperar` y los toca por bounds; si no puede, usa fallback aproximado `(725, 1090)`.
-4. **Pantalla inicial parcialmente oculta a uiautomator**: cuando solo aparece el reloj, `login()` hace fallback de tap en LOG IN `(540, 1710)` y guarda capturas `blind_login_fallback_*.png`.
-5. **Post-login detection no validada en CI**: los 20 intentos (×3s) deberían bastar, pero falta confirmar qué textos aparecen tras login.
-6. **Flujo de reserva no validado end-to-end**: el código está implementado pero aún no ha llegado a hacer click en RESERVAR con éxito en CI.
-7. **Nombre real de la clase CICLO**: puede ser "Ciclo", "Cycling", "Indoor Cycling" u otro. Se sabrá cuando `find_card_and_book` llegue a la lista de clases. La búsqueda es case-insensitive (`nombre.upper() in l.upper()`).
-8. **Split arm64_v8a en x86_64**: el emulador puede estar usando traducción binaria, explicando parte de la lentitud.
-9. **Cuenta/club**: no confirmado que la cuenta quede automáticamente asociada al club Mercantil en el emulador; podría requerir configuración manual la primera vez.
-
-Siguiente diagnóstico recomendado si falla otro run:
-
-1. Revisar `gym_bot.log`.
-2. Abrir `login_failed_hierarchy.xml`.
-3. Comparar las capturas `blind_login_fallback_*.png`, `login_form_not_found_*.png` y `after_adb_type_*.png`.
-4. Si el campo email existe pero queda vacío, el problema es foco/input.
-5. Si el campo email no existe, el problema sigue siendo onboarding/renderizado/ANR, no la escritura de texto.
-
-## Comandos útiles
-
-Inicializar uiautomator2:
-
-```powershell
-python -m uiautomator2 init -s emulator-5554
+```text
+POWER,19:00,3
+OMNIA,09:30,6
 ```
 
-Arrancar app:
+Artefactos:
 
-```powershell
-.\platform-tools\adb.exe -s emulator-5554 shell monkey -p com.technogym.tgapp 1
-```
+- `screenshots-{run_id}`: capturas y XML de diagnostico si existen.
+- `gym-bot-log-{run_id}`: `gym_bot.log`.
 
-Limpiar datos app:
+## Geelark Cloud Phone
 
-```powershell
-.\platform-tools\adb.exe -s emulator-5554 shell pm clear com.technogym.tgapp
-```
+El bot resuelve el telefono, lo arranca, habilita ADB, obtiene ip/puerto/password y conecta por ADB remoto.
 
-Captura sin uiautomator:
+Estados vistos:
 
-```powershell
-.\platform-tools\adb.exe -s emulator-5554 exec-out screencap -p > screenshots\capture.png
-```
+- `status=1`: running.
+- `status=2`: arrancando.
+- `status=0`: parado.
+- `status=-1`: phone id no encontrado.
 
-Logcat filtrado:
-
-```powershell
-.\platform-tools\adb.exe -s emulator-5554 logcat -d -t 500 |
-  Select-String -Pattern 'technogym|tgapp|FATAL|AndroidRuntime|Exception|ANR|GooglePlayServices|Flutter|WebView' -CaseSensitive:$false
-```
-
-Dump de jerarquía UI:
+Cambio importante:
 
 ```python
-import uiautomator2 as u2
-d = u2.connect("emulator-5554")
-print(d.dump_hierarchy())
+gl.ensure_phone_running(phone_id, attempts=2, timeout=240)
 ```
 
-JDK para herramientas Android:
+Si el telefono se queda en `status=2`, el bot:
+
+1. Espera hasta 240s.
+2. Si no llega a running, hace `stop_phone`.
+3. Espera 20s.
+4. Reintenta start + wait otros 240s.
+
+Esto evita fallos frecuentes tipo:
+
+```text
+Phone *** did not reach running status in 180s
+```
+
+## uiautomator2
+
+No usar `python -m uiautomator2 init` en el run normal.
+
+Motivo: en Geelark el cloud phone ya tiene u2 instalado y `u2.connect()` arranca/conecta el servidor si hace falta. El `init` se colgaba y consumia 120s.
+
+Flujo actual:
+
+```python
+device = connect_u2(serial, max_wait=60)
+```
+
+`connect_u2()` reintenta `u2.connect(serial)` y `device.info`.
+
+## Navegacion en Technogym
+
+Puntos validos para entrar a reservas desde home:
+
+1. Card `Reserva una clase`.
+2. Pestaña inferior `COLECTIVAS`.
+
+No buscar ni usar `SPORTS CENTER`, `Mercantil`, ni el nombre del club como target de navegacion. Es solo texto incidental de pantalla.
+
+En la app del movil se ve:
+
+- Home: `Entrenador`, tarjeta `Reserva una clase`, bottom nav `COLECTIVAS`.
+- Pantalla de clases: pestaña superior `Colectivas`, filtros `Hora de inicio`, `Entrenador`, selector de dias y tarjetas.
+
+El XML de uiautomator puede exponer textos internos diferentes o no exponer los textos visibles. Por eso la navegacion actual es OCR-first:
+
+1. OCR busca y toca `Reserva una clase` en la zona de la card.
+2. OCR busca y toca `COLECTIVAS` en bottom nav.
+3. XML se usa solo como respaldo.
+4. Coordenadas relativas quedan como ultimo fallback.
+
+Fallback de coordenadas actual para la card:
+
+```python
+(x=38%, y=64%)  # zona texto/card Reserva una clase
+(x=88%, y=64%)  # zona + de la misma fila
+```
+
+Fallback para bottom nav:
+
+```python
+(x=30%, y=94%)  # COLECTIVAS
+```
+
+## OCR
+
+El OCR existe porque XML/uiautomator no detecta de forma fiable:
+
+- `Reserva una clase`
+- `COLECTIVAS`
+- `Hora de inicio`
+- `OMNIA`
+- `9:30`
+- `SEGUIR`
+- `RESERVAR`
+- `DEJAR DE SEGUIR`
+
+OCR se usa para:
+
+- Confirmar navegacion.
+- Leer tarjetas de clases.
+- Emparejar `nombre + hora + boton`.
+- Verificar estado posterior a una accion.
+
+El OCR prueba varias versiones:
+
+- pantalla completa;
+- recorte de zona de tarjetas;
+- gris con autocontraste;
+- invertida;
+- invertida con umbral;
+- Tesseract `--psm 11` para texto disperso.
+
+Funciones importantes:
+
+```python
+ocr_screen_words(...)
+ocr_lines(...)
+find_and_tap_by_ocr(...)
+tap_nav_text_by_ocr(...)
+verify_action_result(...)
+```
+
+## Reglas Anti-Falso-Positivo
+
+Muy importante: el bot no debe inventar exito.
+
+No basta con tocar una coordenada. Despues de cualquier accion debe verificar el nuevo estado por XML u OCR.
+
+Verificaciones actuales:
+
+- Si toca `SEGUIR`, debe aparecer `DEJAR DE SEGUIR`.
+- Si toca `RESERVAR`, debe aparecer una señal de reserva, por ejemplo `CANCELAR`, `RESERVADA`, `BOOKED`.
+- Si toca `UNETE` / lista de espera, debe aparecer una señal de lista o cancelacion.
+
+Si no se verifica:
+
+- guarda screenshot;
+- guarda hierarchy XML;
+- devuelve fallo;
+- no escribe `SEGUIR`, `RESERVED` ni `WAITLIST` como exito.
+
+Funcion:
+
+```python
+verify_action_result(device, serial, result)
+```
+
+## SEGUIR vs DEJAR DE SEGUIR
+
+En Technogym:
+
+- Antes de seguir una clase aparece `SEGUIR`.
+- Despues de seguirla debe aparecer `DEJAR DE SEGUIR`.
+
+El log debe usar la terminologia de la app:
+
+```text
+SEGUIR verified by OCR/XML: DEJARDESEGUIR visible
+SEGUIR: OMNIA 09:30
+```
+
+No usar `FOLLOWED` en mensajes al usuario/log final, aunque internamente el resultado de codigo pueda llamarse `followed`.
+
+## Flujo Principal Actual
+
+1. Resolver `phone_id`.
+2. `ensure_phone_running()`.
+3. Habilitar ADB.
+4. Conectar ADB remoto con `glogin`.
+5. Esperar ADB ready.
+6. `connect_u2()`.
+7. Encender pantalla.
+8. Reiniciar app Technogym.
+9. Login si hace falta.
+10. Navegar a `COLECTIVAS` OCR-first.
+11. Seleccionar dia.
+12. Buscar tarjeta OCR-first por `nombre + hora`.
+13. Tocar `SEGUIR`, `RESERVAR`, `UNETE` o detectar `CANCELAR`.
+14. Verificar estado final antes de reportar exito.
+15. Parar cloud phone en `finally`.
+
+## Seleccion de Dia
+
+`select_day()` calcula el proximo dia de clase con:
+
+```python
+days_ahead = (dia_clase - today.weekday()) % 7 or 7
+```
+
+Busca abreviatura + numero:
+
+- `LUN`, `MAR`, `MIE/MIÉ`, `JUE`, `VIE`, `SAB/SÁB`, `DOM`
+- numero de dia visible.
+
+Si XML no expone el dia, actualmente puede fallar con:
+
+```text
+Day not found: weekday 6
+```
+
+No debe abortar automaticamente por eso si ya esta en la pantalla correcta; la tarjeta aun puede estar visible.
+
+## FORCE_CLASS
+
+`FORCE_CLASS` tiene formato:
+
+```text
+NOMBRE,HH:MM,dia_weekday
+```
+
+Ejemplos:
+
+```text
+OMNIA,09:30,6
+BODYTONO,18:00,0
+POWER,19:00,3
+```
+
+El bot acepta variantes de hora:
+
+```text
+09:30 == 9:30
+```
+
+Funcion:
+
+```python
+time_variants(hora)
+```
+
+## Logs Importantes
+
+Buscar estas lineas:
+
+```text
+Geelark start attempt
+Phone status code
+u2 connected
+--- NAVIGATE TO COLECTIVAS ---
+OCR nav tapping
+Navigation confirmed by OCR marker
+--- BOOK: ...
+OCR words
+OCR matches
+OCR tapping
+SEGUIR verified
+RESERVAR verified
+not verified
+```
+
+Si aparece:
+
+```text
+Phone status code: 2
+Phone did not reach running status
+```
+
+El fallo es Geelark/arranque del cloud phone, no Technogym ni OCR.
+
+Si aparece:
+
+```text
+OCR matches: time=[], name=[], actions=[]
+```
+
+OCR no esta leyendo la tarjeta. Revisar screenshots del artifact.
+
+## Estado de Pruebas Recientes
+
+Cambios recientes ya pusheados:
+
+- Quitado `uiautomator2 init`.
+- Navegacion OCR-first para `Reserva una clase` y `COLECTIVAS`.
+- OCR-first para tarjetas de reserva.
+- Verificacion obligatoria antes de reportar exito.
+- Logs usan `SEGUIR`, no `FOLLOWED`.
+- Eliminadas referencias a `SPORTS CENTER` como indicador/target.
+- Reintento de arranque Geelark si el phone queda en `status=2`.
+
+Ultimo objetivo de prueba usado:
+
+```text
+OMNIA,09:30,6
+```
+
+Hubo un run que reporto `SEGUIR` por fallback visual, pero el movil del usuario no lo reflejo. Se corrigio para no reportar exito si no aparece `DEJAR DE SEGUIR`.
+
+## Pendientes Reales
+
+1. Validar un run donde el cloud phone arranque correctamente y OCR-first navegue por `Reserva una clase` o `COLECTIVAS`.
+2. Confirmar que OCR lee la tarjeta de clase (`OMNIA`, `9:30`, `SEGUIR`).
+3. Confirmar que tras tocar `SEGUIR` aparece `DEJAR DE SEGUIR`.
+4. Si OCR sigue sin leer tarjetas, descargar artifact `screenshots-{run_id}` y ajustar preprocesado/recorte.
+5. Para reservas reales, verificar `RESERVAR -> CANCELAR/RESERVADA`.
+
+## Comandos Utiles Locales
+
+Compilar sintaxis:
 
 ```powershell
-$env:JAVA_HOME='C:\Users\ccard\Proyectos\gym-bot-alicia\jdk17\jdk-17.0.19+10'
+python -m py_compile .\gym_bot.py
+```
+
+Ver estado git:
+
+```powershell
+git status --short --branch
+```
+
+Buscar logs locales:
+
+```powershell
+Get-Content .\gym_bot.log -Tail 200
+```
+
+ADB basico:
+
+```powershell
+adb devices
+adb shell getprop sys.boot_completed
+adb shell monkey -p com.technogym.tgapp 1
 ```
 
 ## Cuidado
 
-- No volver al APK viejo (2.9.1): no tiene el flujo moderno de reservas.
-- No usar `GymBotAVD30` salvo para comparar; el bueno es `GymBotPlayAVD`.
-- Si el emulador se queda lento, usar ventana visible, esperar, cerrar ANR con `Wait`.
-- No probar reservas reales sin que el usuario lo sepa, salvo que haya pedido expresamente reservar una disponible.
-- Los archivos APK están en Git LFS; cualquier `git clone` nuevo necesita `git lfs pull`.
+- No usar `SPORTS CENTER` / `Mercantil` como target de navegacion.
+- No declarar exito sin verificar estado posterior.
+- No usar coordenadas fijas como exito; solo como ultimo fallback para intentar navegar.
+- No reinstalar ni hacer `uiautomator2 init` en cada run Geelark.
+- No probar reservas reales salvo que el usuario lo pida expresamente.
+- Los archivos locales grandes (`android-tools/`, APKs extraidos, etc.) pueden estar sin trackear y no deben meterse en commits salvo peticion expresa.
