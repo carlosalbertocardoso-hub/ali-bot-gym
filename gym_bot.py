@@ -1115,6 +1115,29 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
     return None
 
 
+def verify_followed(device, serial: str) -> bool:
+    for attempt in range(1, 4):
+        try:
+            xml = safe_dump(device)
+        except Exception:
+            xml = ""
+        if "DEJARDESEGUIR" in compact_norm(xml):
+            log.info(f"  Follow verified by XML (attempt {attempt})")
+            return True
+
+        words = ocr_screen_words(device, serial, f"ocr_follow_verify_{attempt}")
+        if "DEJARDESEGUIR" in "".join(compact_norm(w["text"]) for w in words):
+            log.info(f"  Follow verified by OCR (attempt {attempt})")
+            return True
+
+        time.sleep(2)
+
+    log.warning("  Follow tap not verified: 'DEJAR DE SEGUIR' not found")
+    screenshot(device, serial, "follow_not_verified")
+    save_hierarchy(device, "follow_not_verified")
+    return False
+
+
 def select_station(device, serial: str) -> bool:
     if not device(textContains="Elige tu estación").exists and \
        not device(textContains="Elige tu estacion").exists:
@@ -1200,7 +1223,10 @@ def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
         if result in ('booked', 'waitlist', 'followed'):
             time.sleep(3)
             screenshot(device, serial, f"after_{result}_tap")
-            if result != 'followed':
+            if result == 'followed':
+                if not verify_followed(device, serial):
+                    return False
+            else:
                 select_station(device, serial)
                 time.sleep(2)
                 confirm_booking(device)
