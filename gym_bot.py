@@ -673,8 +673,10 @@ def navigate_to_colectivas(device, serial: str) -> bool:
 
         try:
             width, height = device.window_size()
-            for y_ratio in (0.74, 0.79):
-                x, y = int(width * 0.50), int(height * y_ratio)
+            # Home screen card "Reserva una clase" (red-boxed in the reference
+            # screenshot): left/middle of the card, above "Tus planes".
+            for x_ratio, y_ratio in ((0.38, 0.64), (0.88, 0.64)):
+                x, y = int(width * x_ratio), int(height * y_ratio)
                 log.info(f"  Coordinate fallback tap booking entry from {stage} ({x},{y})")
                 tap_adb(serial, x, y)
                 time.sleep(5)
@@ -717,7 +719,8 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         except Exception as exc:
             log.warning(f"  Tap bottom tab '{txt}' failed: {exc}")
 
-    # Ultimo fallback por coordenadas relativas: COLECTIVAS es la segunda pestana del bottom nav.
+    # Bottom nav "COLECTIVAS" (red-boxed in the reference screenshot). The
+    # SPORTS CENTER header is not a target; it is only incidental screen text.
     try:
         width, height = device.window_size()
         x, y = int(width * 0.30), int(height * 0.94)
