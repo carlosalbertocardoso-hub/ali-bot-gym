@@ -860,51 +860,79 @@ def ocr_screen_words(device, serial: str, name: str = "ocr"):
         log.warning(f"  OCR unavailable: {exc}")
         return []
 
+    words = []
     try:
-        img = Image.open(path)
-        scale = 2
-        img = ImageOps.grayscale(img)
-        img = img.resize((img.width * scale, img.height * scale))
-        data = pytesseract.image_to_data(
-            img,
-            lang="eng",
-            config="--psm 6",
-            output_type=Output.DICT,
-        )
+        base = Image.open(path).convert("RGB")
+        regions = [
+            ("full", base, 0, 0),
+            ("cards", base.crop((0, int(base.height * 0.34), base.width, int(base.height * 0.90))), 0, int(base.height * 0.34)),
+        ]
+        pass_no = 0
+        for region_name, region, offset_x, offset_y in regions:
+            gray = ImageOps.grayscale(region)
+            prepared = [
+                ("gray", ImageOps.autocontrast(gray)),
+                ("invert", ImageOps.autocontrast(ImageOps.invert(gray))),
+                ("threshold", ImageOps.autocontrast(ImageOps.invert(gray)).point(lambda p: 255 if p > 115 else 0)),
+            ]
+            for variant_name, img in prepared:
+                scale = 2
+                img = img.resize((img.width * scale, img.height * scale))
+                try:
+                    data = pytesseract.image_to_data(
+                        img,
+                        lang="eng",
+                        config="--oem 3 --psm 11",
+                        output_type=Output.DICT,
+                    )
+                except Exception as exc:
+                    log.warning(f"  OCR pass failed ({region_name}/{variant_name}): {exc}")
+                    continue
+                pass_no += 1
+                for i, text in enumerate(data.get("text", [])):
+                    text = (text or "").strip()
+                    if not text:
+                        continue
+                    try:
+                        conf = float(data["conf"][i])
+                    except Exception:
+                        conf = -1
+                    if conf < 20:
+                        continue
+                    left = int(data["left"][i] / scale) + offset_x
+                    top = int(data["top"][i] / scale) + offset_y
+                    width = int(data["width"][i] / scale)
+                    height = int(data["height"][i] / scale)
+                    line_key = (
+                        pass_no,
+                        data.get("block_num", [0])[i],
+                        data.get("par_num", [0])[i],
+                        data.get("line_num", [0])[i],
+                    )
+                    words.append({
+                        "text": text,
+                        "norm": normalize_text(text),
+                        "conf": conf,
+                        "bounds": (left, top, left + width, top + height),
+                        "cx": left + width // 2,
+                        "cy": top + height // 2,
+                        "line_key": line_key,
+                    })
     except Exception as exc:
         log.warning(f"  OCR failed: {exc}")
         return []
 
-    words = []
-    for i, text in enumerate(data.get("text", [])):
-        text = (text or "").strip()
-        if not text:
+    deduped = []
+    seen = set()
+    for word in sorted(words, key=lambda w: (-w["conf"], w["bounds"][1], w["bounds"][0])):
+        key = (word["norm"], round(word["cx"] / 12), round(word["cy"] / 12))
+        if key in seen:
             continue
-        try:
-            conf = float(data["conf"][i])
-        except Exception:
-            conf = -1
-        if conf < 20:
-            continue
-        left = int(data["left"][i] / scale)
-        top = int(data["top"][i] / scale)
-        width = int(data["width"][i] / scale)
-        height = int(data["height"][i] / scale)
-        line_key = (
-            data.get("block_num", [0])[i],
-            data.get("par_num", [0])[i],
-            data.get("line_num", [0])[i],
-        )
-        words.append({
-            "text": text,
-            "norm": normalize_text(text),
-            "conf": conf,
-            "bounds": (left, top, left + width, top + height),
-            "cx": left + width // 2,
-            "cy": top + height // 2,
-            "line_key": line_key,
-        })
-    log.info(f"  OCR words: {[w['text'] for w in words[:40]]}")
+        seen.add(key)
+        deduped.append(word)
+
+    words = sorted(deduped, key=lambda w: (w["bounds"][1], w["bounds"][0]))
+    log.info(f"  OCR words ({len(words)}): {[w['text'] for w in words[:80]]}")
     return words
 
 
