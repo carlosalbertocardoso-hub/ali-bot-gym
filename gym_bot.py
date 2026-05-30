@@ -634,260 +634,67 @@ def login(device, serial: str) -> bool:
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
 
-    # Marcadores reales de la pantalla Colectivas (ver capturas):
-    #   pestañas superiores "Colectivas" / "Club"
-    #   filtros "Hora de inicio" / "Entrenador"
-    #   selector de dias LUN..DOM
-    # NOTA: "SPORTS CENTER" / "CIRCULO MERCANTIL" es solo la cabecera del club,
-    # nunca se usa como indicador ni como target de navegacion.
-    DAY_ABBR = ("lun", "mar", "mié", "mie", "jue", "vie", "sáb", "sab", "dom")
+    def xml_has_colectivas(xml: str) -> bool:
+        # Unico marcador seguro: "hora de inicio" solo existe en la lista
+        # de clases, nunca en el home (donde "colectivas" aparece en el nav).
+        return "hora de inicio" in xml.lower()
 
-    def is_colectivas_screen(xml: str) -> bool:
-        lowered = xml.lower()
-        # "Reserva una clase" es la card del HOME, no la lista de clases:
-        # NO sirve para confirmar que ya estamos en Colectivas.
-        # Confirmamos con marcadores que SOLO existen en la lista de clases:
-        #   - filtro "Hora de inicio"
-        #   - pestaña hermana "Club" (solo aparece junto a Colectivas)
-        #   - selector de dias con >=3 abreviaturas visibles
-        if "hora de inicio" in lowered:
-            return True
-        if "colectivas" in lowered and "club" in lowered:
-            return True
-        if sum(1 for d in DAY_ABBR if d in lowered) >= 3:
-            return True
-        return False
-
-    def dump_stage(stage: str) -> str:
+    def dump_xml() -> str:
         try:
-            xml = safe_dump(device)
-            visible = xml_visible_strings(xml)
-            useful = [
-                v for v in visible
-                if any(marker in normalize_text(v) for marker in (
-                    "RESERVA", "COLECTIVAS", "HORA", "SEGUIR",
-                    "RESERVAR", "OMNIA", "BODYTONO", "POWER",
-                    "ENTRENADOR", "EXPLORAR", "RETOS", "RESULTADOS",
-                ))
-            ]
-            log.info(f"  {stage} markers: {useful[:12]}")
-            return xml
+            return safe_dump(device)
         except Exception as exc:
-            log.warning(f"  Could not dump {stage}: {exc}")
+            log.warning(f"  dump_hierarchy failed: {exc}")
             return ""
 
-    def is_colectivas_visual(stage: str) -> bool:
-        # 1) XML: dump_hierarchy puede devolver el arbol stale si se llama
-        #    justo despues de un tap. Esperamos a que u2 vea la pantalla nueva.
-        try:
-            device.wait_activity(APP_PACKAGE, timeout=3)
-        except Exception:
-            pass
-        try:
-            xml = safe_dump(device)
-            if is_colectivas_screen(xml):
-                log.info("  Navigation confirmed by XML (Colectivas screen)")
-                return True
-            log.info(f"  XML strings sample: {xml_visible_strings(xml)[:8]}")
-        except Exception as exc:
-            log.warning(f"  XML confirm failed: {exc}")
+    def log_xml_sample(xml: str, label: str):
+        visible = xml_visible_strings(xml)
+        log.info(f"  {label} XML sample: {visible[:10]}")
 
-        # 2) OCR como respaldo. Aceptamos marcadores estables de la pantalla
-        #    de clases: pestañas, filtros y dias. Nunca la cabecera del club.
-        safe_stage = re.sub(r"[^A-Za-z0-9_]+", "_", stage).strip("_").lower()
-        words = ocr_screen_words(device, serial, f"ocr_nav_{safe_stage}")
-        joined = "".join(compact_norm(word["text"]) for word in words)
-        # Marcadores que existen SOLO en la pantalla de clases, nunca en home:
-        #   HORADEINICIO / SEGUIR / RESERVAR / CLUB (pestana hermana)
-        # CLUB es clave: el OCR lo lee fiablemente y no aparece en el home.
-        markers = (
-            "HORADEINICIO", "SEGUIR", "RESERVAR", "RESERVADA", "CANCELAR", "CLUB",
-        )
-        matched = next((marker for marker in markers if marker in joined), None)
-        if matched:
-            log.info(f"  Navigation confirmed by OCR marker: {matched}")
-            return True
-        # Selector de dias: si el OCR lee >=3 abreviaturas, estamos en la lista.
-        day_tokens = ("LUN", "MAR", "MIE", "JUE", "VIE", "SAB", "DOM")
-        day_hits = sum(1 for d in day_tokens if d in joined)
-        if day_hits >= 3:
-            log.info(f"  Navigation confirmed by OCR day selector ({day_hits} days)")
-            return True
-        log.info(f"  OCR joined (nav confirm): {joined[:120]}")
-        return False
+    width, height = device.window_size()
 
-    def tap_nav_text_by_ocr(stage: str, targets, y_min: float = 0.0, y_max: float = 1.0) -> bool:
-        safe_stage = re.sub(r"[^A-Za-z0-9_]+", "_", stage).strip("_").lower()
-        words = ocr_screen_words(device, serial, f"ocr_nav_tap_{safe_stage}")
-        if not words:
-            return False
-        try:
-            _, height = device.window_size()
-        except Exception:
-            height = 9999
+    # --- Intento 1: tocar COLECTIVAS en el bottom-nav por coordenada ---
+    # Bottom-nav tiene 5 pestanas. COLECTIVAS es la 2a (posicion ~30% x, 94% y).
+    # Captura real: 720px ancho, nav a y≈1315 de 1472 total.
+    for attempt in range(1, 4):
+        x_col = int(width * 0.30)
+        y_col = int(height * 0.94)
+        log.info(f"  Tap COLECTIVAS bottom-nav attempt {attempt} ({x_col},{y_col})")
+        tap_adb(serial, x_col, y_col)
+        time.sleep(6)
 
-        lines = ocr_lines(words)
-        target_norms = [compact_norm(target) for target in targets]
-        candidates = []
-        for line in lines:
-            if not (height * y_min <= line["cy"] <= height * y_max):
-                continue
-            line_norm = compact_norm(line["text"])
-            matched = next((target for target in target_norms if target and target in line_norm), None)
-            if matched:
-                candidates.append((line, matched))
-
-        if not candidates:
-            log.info(f"  OCR nav tap found no target for {targets} in {stage}")
-            return False
-
-        line, matched = candidates[0]
-        log.info(f"  OCR nav tapping {matched} at ({line['cx']},{line['cy']}) from '{line['text']}'")
-        tap_adb(serial, line["cx"], line["cy"])
-        time.sleep(5)
-        return True
-
-    if is_colectivas_visual("initial screen"):
-        log.info("  Already on Colectivas")
-        return True
-
-    def try_booking_entry(stage: str) -> bool:
-        if tap_nav_text_by_ocr(stage, ("Reserva una clase", "Reservar cita", "Book a class"), y_min=0.45, y_max=0.82):
-            xml = dump_stage(f"After OCR booking-entry tap from {stage}")
+        xml = dump_xml()
+        if xml_has_colectivas(xml):
+            log.info("  Navigation confirmed by XML (Hora de inicio found)")
             screenshot(device, serial, "after_navigate_colectivas")
-            save_hierarchy(device, "after_navigate_hierarchy")
-            if is_colectivas_screen(xml) or is_colectivas_visual(f"After OCR booking-entry tap from {stage}"):
-                log.info("  Navigation completed")
-                return True
-
-        for txt in ("Reserva una clase", "Reservar cita", "Book a class", "RESERVA UNA CLASE"):
-            try:
-                el = device(textContains=txt)
-                if el.exists:
-                    tap_by_bounds(serial, el)
-                    log.info(f"  Tapped '{txt}'")
-                    time.sleep(5)
-                    xml = dump_stage(f"After '{txt}' tap")
-                    screenshot(device, serial, "after_navigate_colectivas")
-                    save_hierarchy(device, "after_navigate_hierarchy")
-                    if is_colectivas_screen(xml):
-                        log.info("  Navigation completed")
-                        return True
-                    if is_colectivas_visual(f"After {txt} tap"):
-                        log.info("  Navigation completed")
-                        return True
-            except Exception as exc:
-                log.warning(f"  Tap '{txt}' failed: {exc}")
-
-        try:
-            width, height = device.window_size()
-            # Home screen card "Reserva una clase" (red-boxed in the reference
-            # screenshot): left/middle of the card, above "Tus planes".
-            for x_ratio, y_ratio in ((0.38, 0.64), (0.88, 0.64)):
-                x, y = int(width * x_ratio), int(height * y_ratio)
-                log.info(f"  Coordinate fallback tap booking entry from {stage} ({x},{y})")
-                tap_adb(serial, x, y)
-                time.sleep(5)
-                xml = dump_stage(f"After booking-entry coordinate tap from {stage}")
-                screenshot(device, serial, "after_navigate_colectivas")
-                save_hierarchy(device, "after_navigate_hierarchy")
-                if is_colectivas_screen(xml):
-                    log.info("  Navigation completed")
-                    return True
-                if is_colectivas_visual(f"After booking-entry coordinate tap from {stage}"):
-                    log.info("  Navigation completed")
-                    return True
-        except Exception as exc:
-            log.warning(f"  Booking-entry coordinate fallback failed: {exc}")
-        return False
-
-    # Entrada principal desde Entrenador: card/boton "Reserva una clase".
-    if try_booking_entry("initial screen"):
-        return True
-
-    # Fallback: pestana inferior COLECTIVAS.
-    if tap_nav_text_by_ocr("bottom nav", ("COLECTIVAS",), y_min=0.82, y_max=1.0):
-        xml2 = dump_stage("After OCR COLECTIVAS tab")
-        screenshot(device, serial, "after_navigate_colectivas")
-        save_hierarchy(device, "after_navigate_hierarchy")
-        if is_colectivas_screen(xml2) or is_colectivas_visual("After OCR COLECTIVAS tab"):
-            log.info("  Navigation completed")
             return True
-        if try_booking_entry("OCR COLECTIVAS tab"):
+        log_xml_sample(xml, f"attempt {attempt}")
+
+        # Intento por OCR: buscar SEGUIR o HORADEINICIO en pantalla
+        words = ocr_screen_words(device, serial, f"ocr_nav_attempt{attempt}")
+        joined = "".join(compact_norm(w["text"]) for w in words)
+        log.info(f"  OCR joined: {joined[:150]}")
+        if any(m in joined for m in ("HORADEINICIO", "SEGUIR", "RESERVAR", "RESERVADA")):
+            log.info("  Navigation confirmed by OCR")
             return True
 
-    for txt in ("COLECTIVAS", "Colectivas"):
+        # Si el XML muestra el home, intentar tambien via XML tap de COLECTIVAS
         try:
-            el = device(textContains=txt)
+            el = device(textContains="COLECTIVAS")
             if el.exists:
                 tap_by_bounds(serial, el)
-                log.info(f"  Tapped bottom tab '{txt}'")
-                time.sleep(5)
-                xml2 = dump_stage(f"After '{txt}' tab")
-                screenshot(device, serial, "after_navigate_colectivas")
-                save_hierarchy(device, "after_navigate_hierarchy")
-                if is_colectivas_screen(xml2):
-                    log.info("  Navigation completed")
-                    return True
-                if is_colectivas_visual(f"After {txt} tab"):
-                    log.info("  Navigation completed")
-                    return True
-                if try_booking_entry(f"{txt} tab"):
+                log.info("  Tapped COLECTIVAS via uiautomator")
+                time.sleep(6)
+                xml = dump_xml()
+                if xml_has_colectivas(xml):
+                    log.info("  Navigation confirmed by XML after uiautomator tap")
+                    screenshot(device, serial, "after_navigate_colectivas")
                     return True
         except Exception as exc:
-            log.warning(f"  Tap bottom tab '{txt}' failed: {exc}")
+            log.warning(f"  uiautomator COLECTIVAS tap failed: {exc}")
 
-    # Bottom nav "COLECTIVAS" (red-boxed in the reference screenshot).
-    try:
-        width, height = device.window_size()
-        x, y = int(width * 0.30), int(height * 0.94)
-        log.info(f"  Coordinate fallback tap Colectivas ({x},{y})")
-        tap_adb(serial, x, y)
-        time.sleep(5)
-        xml3 = dump_stage("After coordinate Colectivas tap")
-        save_hierarchy(device, "after_navigate_hierarchy")
-        screenshot(device, serial, "after_navigate_colectivas")
-        if is_colectivas_screen(xml3):
-            log.info("  Navigation completed")
-            return True
-        if is_colectivas_visual("After coordinate Colectivas tap"):
-            log.info("  Navigation completed")
-            return True
-        if try_booking_entry("coordinate tab"):
-            return True
-    except Exception as exc:
-        log.warning(f"  Coordinate fallback failed: {exc}")
-
-    # Si aparece una vista intermedia, tocar la subpestana superior Colectivas
-    # antes de buscar filtros y tarjetas.
-    try:
-        width, height = device.window_size()
-        x, y = int(width * 0.24), int(height * 0.20)
-        log.info(f"  Coordinate fallback tap top Colectivas subtab ({x},{y})")
-        tap_adb(serial, x, y)
-        time.sleep(5)
-        xml4 = dump_stage("After top Colectivas subtab tap")
-        save_hierarchy(device, "after_navigate_hierarchy")
-        screenshot(device, serial, "after_navigate_colectivas")
-        if is_colectivas_screen(xml4):
-            log.info("  Navigation completed")
-            return True
-        if is_colectivas_visual("After top Colectivas subtab tap"):
-            log.info("  Navigation completed")
-            return True
-    except Exception as exc:
-        log.warning(f"  Top Colectivas subtab fallback failed: {exc}")
-
-    for txt in ("Hora de inicio", "SEGUIR", "RESERVAR"):
-        try:
-            el = device(textContains=txt)
-            if el.exists:
-                log.info(f"  Navigation completed by visible marker: {txt}")
-                return True
-        except Exception as exc:
-            log.warning(f"  Marker check failed for '{txt}': {exc}")
-
-    log.warning("  Could not confirm Colectivas screen")
+    screenshot(device, serial, "nav_failed")
+    save_hierarchy(device, "nav_failed_hierarchy")
+    log.warning("  Could not confirm Colectivas screen after 3 attempts")
     return False
 
 
@@ -1548,7 +1355,9 @@ def main():
         log.info("App started — waiting 15s...")
         time.sleep(15)
 
-        # 5. Login
+        # 5. Login — la app ya esta logueada en el cloud phone.
+        # Solo verificamos que estemos en home; si hay pantalla de login
+        # la manejamos, pero en condiciones normales se salta directamente.
         if not login(device, serial):
             log.error("Login failed — aborting")
             return
