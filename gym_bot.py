@@ -78,6 +78,7 @@ DISMISS_TEXTS = [
     "While using the app", "Only this time",
     "START", "Empezar", "Siguiente", "ACEPTAR",
     "Permitir", "Mientras se usa la app", "Solo esta vez",
+    "Seguir", "SEGUIR",
 ]
 
 
