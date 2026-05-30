@@ -1498,15 +1498,16 @@ def main():
         device.screen_on()
         time.sleep(2)
 
-        # 4. Arrancar app
-        # NUNCA hacer app_stop: matar la app en Geelark provoca que al
-        # relanzarla muestre una pantalla de seleccion de club que no
-        # aparece en uso normal. app_start sin stop trae la app al frente
-        # si ya estaba abierta, o la lanza desde el estado guardado si no.
-        log.info("Launching Technogym (no stop)...")
-        device.app_start(APP_PACKAGE)
-        log.info("App launched — waiting 15s...")
-        time.sleep(15)
+        # 4. Traer Technogym al frente
+        # El cloud phone de Geelark ya tiene la app instalada y logueada.
+        # Usamos monkey (intent LAUNCHER) para traerla al frente sin
+        # reiniciarla — preserva el estado de sesion y evita la pantalla
+        # de seleccion de club que aparece al arrancar desde cero.
+        log.info("Bringing Technogym to foreground via monkey...")
+        run_adb(serial, "shell", "monkey", "-p", APP_PACKAGE,
+                "-c", "android.intent.category.LAUNCHER", "1", timeout=15)
+        log.info("App in foreground — waiting 10s...")
+        time.sleep(10)
 
         # 5. Login
         if not login(device, serial):
