@@ -944,11 +944,8 @@ def main():
         serial = connect_adb(ip, port, password)
         wait_adb_ready(serial, timeout=120)
 
-        # 3. Iniciar uiautomator2
-        log.info("Initialising uiautomator2 on cloud phone...")
-        subprocess.run(["python", "-m", "uiautomator2", "init", "-s", serial],
-                       timeout=120, check=False)
-
+        # 3. Conectar uiautomator2 (u2.connect arranca el servidor si hace falta)
+        log.info("Connecting uiautomator2 on cloud phone...")
         device = connect_u2(serial, max_wait=60)
         device.screen_on()
         time.sleep(2)
