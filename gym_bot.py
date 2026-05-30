@@ -1022,7 +1022,7 @@ def find_and_tap_by_ocr(device, serial: str, nombre: str, hora: str):
 
 
 def visual_follow_fallback(device, serial: str, nombre: str, hora: str):
-    # Last resort for the one-off OMNIA follow test when the list text is not
+    # Last resort for the one-off OMNIA SEGUIR test when the list text is not
     # exposed in the uiautomator hierarchy. Do not use this as generic booking
     # logic because button Y positions vary by time slot and scroll position.
     if not os.environ.get("FORCE_CLASS"):
@@ -1122,17 +1122,17 @@ def verify_followed(device, serial: str) -> bool:
         except Exception:
             xml = ""
         if "DEJARDESEGUIR" in compact_norm(xml):
-            log.info(f"  Follow verified by XML (attempt {attempt})")
+            log.info(f"  SEGUIR verified by XML: 'DEJAR DE SEGUIR' visible (attempt {attempt})")
             return True
 
         words = ocr_screen_words(device, serial, f"ocr_follow_verify_{attempt}")
         if "DEJARDESEGUIR" in "".join(compact_norm(w["text"]) for w in words):
-            log.info(f"  Follow verified by OCR (attempt {attempt})")
+            log.info(f"  SEGUIR verified by OCR: 'DEJAR DE SEGUIR' visible (attempt {attempt})")
             return True
 
         time.sleep(2)
 
-    log.warning("  Follow tap not verified: 'DEJAR DE SEGUIR' not found")
+    log.warning("  SEGUIR tap not verified: 'DEJAR DE SEGUIR' not found")
     screenshot(device, serial, "follow_not_verified")
     save_hierarchy(device, "follow_not_verified")
     return False
@@ -1235,7 +1235,7 @@ def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
             result_label = {
                 'booked': 'RESERVED',
                 'waitlist': 'WAITLIST',
-                'followed': 'FOLLOWED',
+                'followed': 'SEGUIR',
             }[result]
             log.info(f"{result_label}: {nombre} {hora}")
             return True
