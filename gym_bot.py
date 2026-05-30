@@ -119,6 +119,17 @@ class GeelarkClient:
 
     # ── Phone lifecycle ──────────────────────────────────────
 
+    def first_phone_id(self) -> str:
+        """Devuelve el id interno del primer teléfono de la cuenta."""
+        data = self.post("/open/v1/phone/list", {"page": 1, "pageSize": 50})
+        d = data.get("data", {})
+        phones = d.get("items") or d.get("list", [])
+        if phones:
+            pid = phones[0].get("id", "")
+            log.info(f"  First phone id: {pid}, serialName: {phones[0].get('serialName')}")
+            return pid
+        raise RuntimeError("No phones found in Geelark account")
+
     def start_phone(self, phone_id: str):
         log.info(f"Geelark: starting phone {phone_id}")
         self.post("/open/v1/phone/start", {"ids": [phone_id]})
@@ -127,28 +138,27 @@ class GeelarkClient:
         log.info(f"Geelark: stopping phone {phone_id}")
         self.post("/open/v1/phone/stop", {"ids": [phone_id]})
 
-    def phone_status(self, phone_id: str) -> str:
-        """Devuelve el status del teléfono (p.ej. 'running', 'stopped')."""
+    def phone_status(self, phone_id: str) -> int:
+        """Devuelve el status numérico del teléfono (0=parado, 1=corriendo, 2=arrancando)."""
         data = self.post("/open/v1/phone/list", {"page": 1, "pageSize": 50})
-        phones = data.get("data", {}).get("list", [])
-        if not phones:
-            log.info(f"  phone/list returned no phones: {data}")
+        d = data.get("data", {})
+        phones = d.get("items") or d.get("list", [])
         for phone in phones:
-            log.info(f"  phone entry: id={phone.get('id')} serialNo={phone.get('serialNo')} status={phone.get('status')}")
-            if phone.get("id") == phone_id or phone.get("serialNo") == phone_id:
-                return phone.get("status", "unknown")
-        return "unknown"
+            if phone.get("id") == phone_id:
+                return int(phone.get("status", -1))
+        log.warning(f"  Phone {phone_id} not found in list of {len(phones)} phones")
+        return -1
 
     def wait_phone_running(self, phone_id: str, timeout: int = 120):
         log.info("Waiting for Geelark phone to be running...")
         deadline = time.time() + timeout
         while time.time() < deadline:
             status = self.phone_status(phone_id)
-            log.info(f"  Phone status: {status}")
-            if status == "running":
+            log.info(f"  Phone status code: {status}")
+            if status == 1:
                 return
             time.sleep(5)
-        raise TimeoutError(f"Phone {phone_id} did not reach 'running' in {timeout}s")
+        raise TimeoutError(f"Phone {phone_id} did not reach running status in {timeout}s")
 
     # ── ADB ──────────────────────────────────────────────────
 
@@ -850,18 +860,25 @@ def main():
     if not GEELARK_APP_ID or not GEELARK_API_KEY or not GEELARK_PHONE_ID:
         raise RuntimeError("Missing Geelark credentials: set GEELARK_APP_ID, GEELARK_API_KEY, GEELARK_PHONE_ID")
 
-    gl     = GeelarkClient(GEELARK_APP_ID, GEELARK_API_KEY)
-    serial = None
-    device = None
+    gl       = GeelarkClient(GEELARK_APP_ID, GEELARK_API_KEY)
+    phone_id = GEELARK_PHONE_ID
+    serial   = None
+    device   = None
 
     try:
-        # 1. Arrancar el cloud phone
-        gl.start_phone(GEELARK_PHONE_ID)
-        gl.wait_phone_running(GEELARK_PHONE_ID, timeout=120)
+        # 1. Resolver el ID real del teléfono (el secret puede ser el serialNo externo)
+        phone_id = GEELARK_PHONE_ID
+        if gl.phone_status(phone_id) == -1:
+            log.info(f"Phone ID {phone_id} not found — using first phone in account")
+            phone_id = gl.first_phone_id()
 
-        # 2. Habilitar ADB y obtener conexión
-        gl.enable_adb(GEELARK_PHONE_ID)
-        adb_info = gl.get_adb_info(GEELARK_PHONE_ID)
+        # 2. Arrancar el cloud phone
+        gl.start_phone(phone_id)
+        gl.wait_phone_running(phone_id, timeout=180)
+
+        # 3. Habilitar ADB y obtener conexión
+        gl.enable_adb(phone_id)
+        adb_info = gl.get_adb_info(phone_id)
         log.info(f"ADB info: {adb_info}")
 
         ip       = adb_info.get("ip") or adb_info.get("host")
@@ -922,7 +939,7 @@ def main():
     finally:
         # Apagar el cloud phone siempre (para no consumir créditos)
         try:
-            gl.stop_phone(GEELARK_PHONE_ID)
+            gl.stop_phone(phone_id)
             log.info("Geelark phone stopped")
         except Exception as exc:
             log.warning(f"Could not stop Geelark phone: {exc}")
