@@ -58,7 +58,7 @@ CLASES = [
 
 HOME_INDICATORS = [
     "colectivas", "reserva una clase", "tus citas", "entrenador",
-    "explorar", "movergy", "tus planes", "sports center", "mercantil",
+    "explorar", "movergy", "tus planes",
     "book a class", "your appointments", "reservar cita",
 ]
 AUTHENTICATED_INDICATORS = [
@@ -629,7 +629,15 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         try:
             xml = safe_dump(device)
             visible = xml_visible_strings(xml)
-            log.info(f"  {stage} visible: {visible[:15]}")
+            useful = [
+                v for v in visible
+                if any(marker in normalize_text(v) for marker in (
+                    "RESERVA", "COLECTIVAS", "HORA", "SEGUIR",
+                    "RESERVAR", "OMNIA", "BODYTONO", "POWER",
+                    "ENTRENADOR", "EXPLORAR", "RETOS", "RESULTADOS",
+                ))
+            ]
+            log.info(f"  {stage} markers: {useful[:12]}")
             return xml
         except Exception as exc:
             log.warning(f"  Could not dump {stage}: {exc}")
@@ -719,8 +727,7 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         except Exception as exc:
             log.warning(f"  Tap bottom tab '{txt}' failed: {exc}")
 
-    # Bottom nav "COLECTIVAS" (red-boxed in the reference screenshot). The
-    # SPORTS CENTER header is not a target; it is only incidental screen text.
+    # Bottom nav "COLECTIVAS" (red-boxed in the reference screenshot).
     try:
         width, height = device.window_size()
         x, y = int(width * 0.30), int(height * 0.94)
