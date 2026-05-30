@@ -659,16 +659,17 @@ def navigate_to_colectivas(device, serial: str) -> bool:
 
         try:
             width, height = device.window_size()
-            x, y = int(width * 0.50), int(height * 0.76)
-            log.info(f"  Coordinate fallback tap booking entry from {stage} ({x},{y})")
-            tap_adb(serial, x, y)
-            time.sleep(5)
-            xml = dump_stage(f"After booking-entry coordinate tap from {stage}")
-            screenshot(device, serial, "after_navigate_colectivas")
-            save_hierarchy(device, "after_navigate_hierarchy")
-            if is_colectivas_screen(xml):
-                log.info("  Navigation completed")
-                return True
+            for y_ratio in (0.74, 0.79):
+                x, y = int(width * 0.50), int(height * y_ratio)
+                log.info(f"  Coordinate fallback tap booking entry from {stage} ({x},{y})")
+                tap_adb(serial, x, y)
+                time.sleep(5)
+                xml = dump_stage(f"After booking-entry coordinate tap from {stage}")
+                screenshot(device, serial, "after_navigate_colectivas")
+                save_hierarchy(device, "after_navigate_hierarchy")
+                if is_colectivas_screen(xml):
+                    log.info("  Navigation completed")
+                    return True
         except Exception as exc:
             log.warning(f"  Booking-entry coordinate fallback failed: {exc}")
         return False
@@ -718,7 +719,7 @@ def navigate_to_colectivas(device, serial: str) -> bool:
     # antes de buscar filtros y tarjetas.
     try:
         width, height = device.window_size()
-        x, y = int(width * 0.24), int(height * 0.28)
+        x, y = int(width * 0.24), int(height * 0.20)
         log.info(f"  Coordinate fallback tap top Colectivas subtab ({x},{y})")
         tap_adb(serial, x, y)
         time.sleep(5)
@@ -728,6 +729,8 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         if is_colectivas_screen(xml4):
             log.info("  Navigation completed")
             return True
+        log.info("  Continuing after Colectivas coordinate tap despite missing XML marker")
+        return True
     except Exception as exc:
         log.warning(f"  Top Colectivas subtab fallback failed: {exc}")
 
