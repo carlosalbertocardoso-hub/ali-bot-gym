@@ -93,14 +93,15 @@ class GeelarkClient:
         self.api_key = api_key
 
     def _headers(self) -> dict:
-        ts    = str(int(time.time() * 1000))
-        nonce = uuid.uuid4().hex[:6]
-        raw   = f"{self.app_id}{ts}{nonce}{self.api_key}"
-        sign  = hashlib.sha256(raw.encode()).hexdigest().upper()
+        ts       = str(int(time.time() * 1000))
+        trace_id = uuid.uuid4().hex
+        nonce    = trace_id[:6]
+        raw      = f"{self.app_id}{trace_id}{ts}{nonce}{self.api_key}"
+        sign     = hashlib.sha256(raw.encode()).hexdigest().upper()
         return {
             "Content-Type": "application/json",
             "appId":   self.app_id,
-            "traceId": uuid.uuid4().hex,
+            "traceId": trace_id,
             "ts":      ts,
             "nonce":   nonce,
             "sign":    sign,
