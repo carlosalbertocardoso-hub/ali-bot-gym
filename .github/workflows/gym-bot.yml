@@ -34,12 +34,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install uiautomator2 requests
+        run: pip install uiautomator2 requests pytesseract
 
-      - name: Install ADB
+      - name: Install ADB and OCR
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y adb
+          sudo apt-get install -y adb tesseract-ocr
 
       - name: Run bot
         run: python gym_bot.py

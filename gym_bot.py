@@ -850,6 +850,151 @@ def time_variants(hora: str):
     return sorted(variants, key=len)
 
 
+def ocr_screen_words(device, serial: str, name: str = "ocr"):
+    path = screenshot(device, serial, name)
+    try:
+        from PIL import Image, ImageOps
+        import pytesseract
+        from pytesseract import Output
+    except Exception as exc:
+        log.warning(f"  OCR unavailable: {exc}")
+        return []
+
+    try:
+        img = Image.open(path)
+        scale = 2
+        img = ImageOps.grayscale(img)
+        img = img.resize((img.width * scale, img.height * scale))
+        data = pytesseract.image_to_data(
+            img,
+            lang="eng",
+            config="--psm 6",
+            output_type=Output.DICT,
+        )
+    except Exception as exc:
+        log.warning(f"  OCR failed: {exc}")
+        return []
+
+    words = []
+    for i, text in enumerate(data.get("text", [])):
+        text = (text or "").strip()
+        if not text:
+            continue
+        try:
+            conf = float(data["conf"][i])
+        except Exception:
+            conf = -1
+        if conf < 20:
+            continue
+        left = int(data["left"][i] / scale)
+        top = int(data["top"][i] / scale)
+        width = int(data["width"][i] / scale)
+        height = int(data["height"][i] / scale)
+        line_key = (
+            data.get("block_num", [0])[i],
+            data.get("par_num", [0])[i],
+            data.get("line_num", [0])[i],
+        )
+        words.append({
+            "text": text,
+            "norm": normalize_text(text),
+            "conf": conf,
+            "bounds": (left, top, left + width, top + height),
+            "cx": left + width // 2,
+            "cy": top + height // 2,
+            "line_key": line_key,
+        })
+    log.info(f"  OCR words: {[w['text'] for w in words[:40]]}")
+    return words
+
+
+def ocr_lines(words):
+    grouped = {}
+    for word in words:
+        grouped.setdefault(word["line_key"], []).append(word)
+
+    lines = []
+    for line_words in grouped.values():
+        line_words = sorted(line_words, key=lambda w: w["bounds"][0])
+        text = " ".join(w["text"] for w in line_words)
+        x1 = min(w["bounds"][0] for w in line_words)
+        y1 = min(w["bounds"][1] for w in line_words)
+        x2 = max(w["bounds"][2] for w in line_words)
+        y2 = max(w["bounds"][3] for w in line_words)
+        lines.append({
+            "text": text,
+            "norm": normalize_text(text),
+            "bounds": (x1, y1, x2, y2),
+            "cx": (x1 + x2) // 2,
+            "cy": (y1 + y2) // 2,
+            "words": line_words,
+        })
+    return sorted(lines, key=lambda line: (line["bounds"][1], line["bounds"][0]))
+
+
+def normalized_time_text(text: str) -> str:
+    return re.sub(r"[^0-9:]", "", text.replace(".", ":"))
+
+
+def compact_norm(text: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", normalize_text(text))
+
+
+def find_and_tap_by_ocr(device, serial: str, nombre: str, hora: str):
+    words = ocr_screen_words(device, serial, "ocr_booking")
+    if not words:
+        return None
+
+    lines = ocr_lines(words)
+    horas = set(time_variants(hora))
+    target_name = compact_norm(nombre)
+    time_lines = [
+        line for line in lines
+        if any(h in normalized_time_text(line["text"]) for h in horas)
+    ]
+    name_lines = [line for line in lines if target_name in compact_norm(line["text"])]
+    action_words = [
+        word for word in words
+        if word["norm"] in ("RESERVAR", "SEGUIR", "UNETE", "CANCELAR")
+    ]
+    log.info(
+        "  OCR matches: "
+        f"time={[l['text'] for l in time_lines[:3]]}, "
+        f"name={[l['text'] for l in name_lines[:3]]}, "
+        f"actions={[w['text'] for w in action_words[:5]]}"
+    )
+
+    best = None
+    best_score = None
+    for time_line in time_lines:
+        for name_line in name_lines:
+            dy = abs(time_line["cy"] - name_line["cy"])
+            if dy > 220:
+                continue
+            top = min(time_line["bounds"][1], name_line["bounds"][1]) - 90
+            bottom = max(time_line["bounds"][3], name_line["bounds"][3]) + 220
+            for action in action_words:
+                if not (top <= action["cy"] <= bottom):
+                    continue
+                score = dy + abs(action["cy"] - name_line["cy"])
+                if best_score is None or score < best_score:
+                    best = action
+                    best_score = score
+
+    if not best:
+        log.info("  OCR could not pair class/time with an action button")
+        return None
+
+    result = "followed" if best["norm"] == "SEGUIR" else "booked"
+    if best["norm"] == "CANCELAR":
+        result = "already"
+    elif best["norm"] == "UNETE":
+        result = "waitlist"
+    log.info(f"  OCR tapping {best['text']} at ({best['cx']},{best['cy']})")
+    tap_adb(serial, best["cx"], best["cy"])
+    return result
+
+
 def visual_follow_fallback(device, serial: str, nombre: str, hora: str):
     # Last resort for the one-off OMNIA follow test when the list text is not
     # exposed in the uiautomator hierarchy. Do not use this as generic booking
@@ -901,7 +1046,8 @@ def find_and_tap_booking_button(device, serial: str, nombre: str, hora: str):
 
     if card_line is None:
         log.info(f"  No card found for {nombre} @ {hora}")
-        return visual_follow_fallback(device, serial, nombre, hora)
+        return find_and_tap_by_ocr(device, serial, nombre, hora) or \
+               visual_follow_fallback(device, serial, nombre, hora)
 
     start = max(0, card_line - 50)
     end   = min(len(lines), card_line + 50)
