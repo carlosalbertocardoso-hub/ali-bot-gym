@@ -635,6 +635,17 @@ def navigate_to_colectivas(device, serial: str) -> bool:
             log.warning(f"  Could not dump {stage}: {exc}")
             return ""
 
+    def is_colectivas_visual(stage: str) -> bool:
+        safe_stage = re.sub(r"[^A-Za-z0-9_]+", "_", stage).strip("_").lower()
+        words = ocr_screen_words(device, serial, f"ocr_nav_{safe_stage}")
+        joined = "".join(compact_norm(word["text"]) for word in words)
+        markers = ("COLECTIVAS", "HORADEINICIO", "SEGUIR", "RESERVAR")
+        matched = next((marker for marker in markers if marker in joined), None)
+        if matched:
+            log.info(f"  Navigation confirmed by OCR marker: {matched}")
+            return True
+        return False
+
     xml0 = dump_stage("Initial screen")
     if is_colectivas_screen(xml0):
         log.info("  Already on Colectivas")
@@ -654,6 +665,9 @@ def navigate_to_colectivas(device, serial: str) -> bool:
                     if is_colectivas_screen(xml):
                         log.info("  Navigation completed")
                         return True
+                    if is_colectivas_visual(f"After {txt} tap"):
+                        log.info("  Navigation completed")
+                        return True
             except Exception as exc:
                 log.warning(f"  Tap '{txt}' failed: {exc}")
 
@@ -668,6 +682,9 @@ def navigate_to_colectivas(device, serial: str) -> bool:
                 screenshot(device, serial, "after_navigate_colectivas")
                 save_hierarchy(device, "after_navigate_hierarchy")
                 if is_colectivas_screen(xml):
+                    log.info("  Navigation completed")
+                    return True
+                if is_colectivas_visual(f"After booking-entry coordinate tap from {stage}"):
                     log.info("  Navigation completed")
                     return True
         except Exception as exc:
@@ -692,6 +709,9 @@ def navigate_to_colectivas(device, serial: str) -> bool:
                 if is_colectivas_screen(xml2):
                     log.info("  Navigation completed")
                     return True
+                if is_colectivas_visual(f"After {txt} tab"):
+                    log.info("  Navigation completed")
+                    return True
                 if try_booking_entry(f"{txt} tab"):
                     return True
         except Exception as exc:
@@ -708,6 +728,9 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         save_hierarchy(device, "after_navigate_hierarchy")
         screenshot(device, serial, "after_navigate_colectivas")
         if is_colectivas_screen(xml3):
+            log.info("  Navigation completed")
+            return True
+        if is_colectivas_visual("After coordinate Colectivas tap"):
             log.info("  Navigation completed")
             return True
         if try_booking_entry("coordinate tab"):
@@ -727,6 +750,9 @@ def navigate_to_colectivas(device, serial: str) -> bool:
         save_hierarchy(device, "after_navigate_hierarchy")
         screenshot(device, serial, "after_navigate_colectivas")
         if is_colectivas_screen(xml4):
+            log.info("  Navigation completed")
+            return True
+        if is_colectivas_visual("After top Colectivas subtab tap"):
             log.info("  Navigation completed")
             return True
     except Exception as exc:
