@@ -587,7 +587,8 @@ def login(device, serial: str) -> bool:
 
 def navigate_to_colectivas(device, serial: str) -> bool:
     log.info("--- NAVIGATE TO COLECTIVAS ---")
-    COLECTIVAS_X, COLECTIVAS_Y = 324, 1860
+    # Galaxy Note20: 1080x2400, bottom nav ~2310px (antes era 1860 para Pixel 2 1080x1920)
+    COLECTIVAS_X, COLECTIVAS_Y = 324, 2310
     log.info(f"  tap COLECTIVAS ({COLECTIVAS_X},{COLECTIVAS_Y})")
     try:
         tap_adb(serial, COLECTIVAS_X, COLECTIVAS_Y)
@@ -601,6 +602,9 @@ def navigate_to_colectivas(device, serial: str) -> bool:
     time.sleep(3)
     log.info("  COLECTIVAS tap completed")
     return True
+
+
+
 
 
 # ============================================================
@@ -781,6 +785,7 @@ def book_class_with_refresh(device, serial: str, clase: dict) -> bool:
     hora   = clase["hora"]
     log.info(f"--- BOOK: {nombre} {hora} ---")
     screenshot(device, serial, "colectivas_before_book")
+    save_hierarchy(device, "colectivas_hierarchy")
 
     deadline = time.time() + 180
     attempt  = 0
